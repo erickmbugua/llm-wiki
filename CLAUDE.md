@@ -128,6 +128,26 @@ response.choices[0].message.content  # pyright: ignore[reportAttributeAccessIssu
 ```
 `.content` can also be `None` — always use `or ""` before calling `.strip()`.
 
+### Ollama local model setup
+The default model is `ollama/qwen2.5-coder:7b`. Before running any ingest, Ollama must be
+running and the model must be pulled:
+```bash
+ollama serve          # start the server (keep this running)
+ollama pull qwen2.5-coder:7b   # one-time pull (~4 GB)
+```
+`ingest_source()` runs a preflight check for any `ollama/*` model string — it hits
+`GET /api/tags` and raises a clear `RuntimeError` if the server is unreachable or the model
+is absent, rather than letting litellm's `ConnectionError` bubble up raw.
+
+To use a non-default Ollama host/port, set the env var before starting the server:
+```bash
+export OLLAMA_API_BASE=http://192.168.1.10:11434
+```
+To switch to a cloud model for a specific vault, set `model` in
+`<vault>/.llm-wiki/config.json`. To change the global default, set `model` in
+`~/.llm-wiki/config.json`. Any litellm-compatible model string works (e.g.
+`"claude-sonnet-4-6"`, `"openai/gpt-4o"`, `"ollama/llama3:8b"`).
+
 ### FTS5 input sanitisation
 User queries can contain FTS5 special characters. Always sanitise before querying:
 ```python

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import textwrap
 from datetime import datetime
@@ -59,6 +60,8 @@ def ingest_source(
     related = _fetch_related(vault_path, wiki_root, text)
 
     model = resolve_model(vault_path)
+    if model.startswith("ollama/"):
+        _check_ollama(model)
     prompt = _build_ingest_prompt(vault_name, schema, related, display_name, text)
 
     log.info("Calling %s for ingest of '%s'", model, display_name)
@@ -133,6 +136,43 @@ def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
             log.error("Failed to ingest %s: %s", fp, e)
             results.append({"file": fp, "status": "failed", "error": str(e)})
     return results
+
+
+# ---------------------------------------------------------------------------
+# Ollama preflight
+# ---------------------------------------------------------------------------
+
+
+def _check_ollama(model: str) -> None:
+    """Verify the Ollama server is reachable and the requested model is pulled.
+
+    Args:
+        model: litellm-format model string, e.g. ``"ollama/qwen2.5-coder:7b"``.
+
+    Raises:
+        RuntimeError: Ollama server is not running or unreachable.
+        RuntimeError: The specific model has not been pulled locally.
+    """
+    base_url = os.environ.get("OLLAMA_API_BASE", "http://localhost:11434").rstrip("/")
+    model_name = model[len("ollama/") :]
+
+    try:
+        resp = requests.get(f"{base_url}/api/tags", timeout=3)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError(
+            f"Ollama is not running or unreachable at {base_url}.\n"
+            f"Start it with: ollama serve\n"
+            f"Then pull the model: ollama pull {model_name}"
+        ) from exc
+
+    available = [m["name"] for m in resp.json().get("models", [])]
+    if model_name not in available:
+        listed = ", ".join(available) if available else "(none)"
+        raise RuntimeError(
+            f"Model '{model_name}' is not pulled. Run: ollama pull {model_name}\n"
+            f"Available models: {listed}"
+        )
 
 
 # ---------------------------------------------------------------------------

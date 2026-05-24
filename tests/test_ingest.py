@@ -4,10 +4,12 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests as req
 
 from core.ingest import (
     _append_log,
     _build_ingest_prompt,
+    _check_ollama,
     _extract_text,
     _parse_llm_json,
     _write_pages,
@@ -267,3 +269,49 @@ class TestIngestSource:
     def test_raises_when_source_unreadable(self, tmp_vault):
         with pytest.raises(ValueError, match="Could not extract text"):
             ingest_source(tmp_vault, "/nonexistent/path/to/file.xyz", "TestVault")
+
+
+# ── _check_ollama ─────────────────────────────────────────────────────────────
+
+
+class TestCheckOllama:
+    def test_success_when_model_present(self):
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {
+            "models": [{"name": "qwen2.5-coder:7b"}, {"name": "llama3:8b"}]
+        }
+        with patch("core.ingest.requests.get", return_value=fake_resp):
+            _check_ollama("ollama/qwen2.5-coder:7b")  # must not raise
+
+    def test_raises_when_server_unreachable(self):
+        with (
+            patch("core.ingest.requests.get", side_effect=req.exceptions.ConnectionError()),
+            pytest.raises(RuntimeError, match="ollama serve"),
+        ):
+            _check_ollama("ollama/qwen2.5-coder:7b")
+
+    def test_raises_when_model_not_pulled(self):
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {"models": [{"name": "llama3:8b"}]}
+        with (
+            patch("core.ingest.requests.get", return_value=fake_resp),
+            pytest.raises(RuntimeError, match="ollama pull"),
+        ):
+            _check_ollama("ollama/qwen2.5-coder:7b")
+
+    def test_ingest_source_skips_preflight_for_non_ollama(self, tmp_vault, fake_llm_response):
+        llm_output = json.dumps(
+            {
+                "source_page": {"file_path": "Sources/X.md", "content": "# X"},
+                "page_updates": [],
+            }
+        )
+        src = tmp_vault / "raw" / "test.txt"
+        src.write_text("some content")
+        with (
+            patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
+            patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
+            patch("core.ingest._check_ollama") as mock_check,
+        ):
+            ingest_source(tmp_vault, str(src), "TestVault")
+        mock_check.assert_not_called()

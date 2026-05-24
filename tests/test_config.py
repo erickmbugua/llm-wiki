@@ -14,7 +14,7 @@ class TestGlobalConfigLoad:
         cfg = GlobalConfig.load()
         assert cfg.vaults == {}
         assert cfg.default_vault is None
-        assert cfg.model == "claude-sonnet-4-6"
+        assert cfg.model == "ollama/qwen2.5-coder:7b"
         assert cfg.server_port == 8000
 
     def test_loads_existing_file(self, patched_global_config):
@@ -44,7 +44,7 @@ class TestGlobalConfigSave:
         cfg.save()
         saved = json.loads((patched_global_config / "config.json").read_text())
         assert saved["vaults"] == {}
-        assert saved["model"] == "claude-sonnet-4-6"
+        assert saved["model"] == "ollama/qwen2.5-coder:7b"
 
     def test_save_roundtrip(self, patched_global_config):
         cfg = GlobalConfig()

@@ -15,7 +15,7 @@ VAULT_DB_FILE = "wiki.db"
 class GlobalConfig:
     vaults: dict[str, str] = field(default_factory=lambda: {})
     default_vault: str | None = None
-    model: str = "claude-sonnet-4-6"
+    model: str = "ollama/qwen2.5-coder:7b"
     server_port: int = 8000
 
     @classmethod

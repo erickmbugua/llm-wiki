@@ -188,7 +188,9 @@ def _build_lint_prompt(pages_context: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _save_lint_report(vault_path: Path, wiki_root: Path, structural: dict[str, Any], llm_report: str) -> str:
+def _save_lint_report(
+    vault_path: Path, wiki_root: Path, structural: dict[str, Any], llm_report: str
+) -> str:
     """Write a combined lint report to the vault root and append a summary entry to log.md.
 
     The report file is named ``lint-YYYY-MM-DD-HHMM.md`` and saved at the vault root
