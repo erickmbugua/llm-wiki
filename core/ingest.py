@@ -370,6 +370,7 @@ def _build_ingest_prompt(
         - source_page goes in Sources/; write a clear summary with [[wikilinks]] to concepts
         - Create or update pages in Concepts/ and Entities/ as appropriate
         - YAML frontmatter must include title and tags fields
+        - Always quote YAML string values that contain colons: title: "Foo: Bar" not title: Foo: Bar
         - Use Obsidian [[Page Name]] syntax for all internal links
         - If a source contradicts an existing page, add a ## Contradictions section
         - page_updates may be an empty array if no concept/entity pages need changes

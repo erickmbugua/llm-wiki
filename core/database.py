@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import frontmatter
+import yaml
 
 from .config import VAULT_DB_FILE, VAULT_INTERNAL_DIR
 
@@ -106,10 +107,15 @@ def upsert_page(conn: sqlite3.Connection, wiki_root: Path, md_path: Path) -> Non
         wiki_root: Root of the wiki directory (used to derive the relative path).
         md_path: Absolute path to the ``.md`` file to index.
     """
-    post = frontmatter.load(str(md_path))
-    content = post.content
-    title = post.get("title") or md_path.stem
-    tags = json.dumps(list(post.get("tags") or []))  # type: ignore[call-overload]
+    try:
+        post = frontmatter.load(str(md_path))
+        content = post.content
+        title = str(post.get("title") or md_path.stem)
+        tags = json.dumps(list(post.get("tags") or []))  # type: ignore[call-overload]
+    except yaml.YAMLError:
+        content = md_path.read_text()
+        title = md_path.stem
+        tags = json.dumps([])
     mtime = md_path.stat().st_mtime
 
     rel_path = str(md_path.relative_to(wiki_root))

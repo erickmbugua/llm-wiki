@@ -196,6 +196,10 @@ class TestBuildIngestPrompt:
         prompt = _build_ingest_prompt("V", "", "### Existing Page\nContent", "f.txt", "text")
         assert "Existing Page" in prompt
 
+    def test_prompt_instructs_yaml_colon_quoting(self):
+        prompt = _build_ingest_prompt("V", "", "", "f.txt", "text")
+        assert "colon" in prompt.lower()
+
 
 # ── _append_log ───────────────────────────────────────────────────────────────
 

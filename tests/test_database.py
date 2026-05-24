@@ -123,6 +123,16 @@ class TestUpsertPage:
         assert row is not None
         assert row["title"] == "NoFrontmatter"
 
+    def test_falls_back_gracefully_on_invalid_yaml(self, tmp_vault, db_conn):
+        wiki = tmp_vault / "wiki"
+        md = wiki / "Concepts" / "BadYaml.md"
+        # Unquoted colon in YAML value — common model output error
+        md.write_text("---\ntitle: Managed Agents: A Deep Dive\ntags: [ai]\n---\nContent.\n")
+        upsert_page(db_conn, wiki, md)  # must not raise
+        row = get_page(db_conn, "Concepts/BadYaml.md")
+        assert row is not None
+        assert row["title"] == "BadYaml"  # falls back to filename stem
+
 
 class TestDeletePage:
     def test_removes_page_record(self, tmp_vault, db_conn):
