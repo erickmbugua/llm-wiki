@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-wiki"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1",
+    "litellm>=1.40",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "watchdog>=4.0",
+    "python-frontmatter>=1.1",
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "mcp>=1.0",
+    "rich>=13.7",
+]
+
+[project.scripts]
+llm-wiki = "main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*"]
+
+[tool.setuptools]
+py-modules = ["main", "main_server"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "httpx>=0.27",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pyright>=1.1",
+    "types-requests>=2.31",
+    "types-beautifulsoup4>=4.12",
+    "pypdf>=3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (unused imports, undefined names, etc.)
+    "I",   # isort (import ordering)
+    "UP",  # pyupgrade (modernise syntax for target Python version)
+    "B",   # flake8-bugbear (likely bugs and design issues)
+    "C4",  # flake8-comprehensions (unnecessary list/dict/set calls)
+    "SIM", # flake8-simplify (simplifiable code patterns)
+]
+ignore = [
+    "E501",   # line too long — handled by the formatter
+    "SIM108", # ternary operator — sometimes less readable
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+files = ["core", "main.py", "main_server.py", "tests"]
+# Errors on genuine mistakes without being overly strict about missing stubs
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Third-party libraries (litellm, mcp, frontmatter, bs4, etc.) lack complete stubs
+ignore_missing_imports = true

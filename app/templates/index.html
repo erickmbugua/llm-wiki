@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llm-wiki</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div id="logo">
+        <span class="logo-icon">⬡</span>
+        <span class="logo-text">llm-wiki</span>
+      </div>
+
+      <div id="vault-selector">
+        <label for="vault-select">Vault</label>
+        <select id="vault-select"></select>
+      </div>
+
+      <nav id="nav">
+        <button class="nav-btn active" data-tab="explorer">Explorer</button>
+        <button class="nav-btn" data-tab="graph">Graph</button>
+        <button class="nav-btn" data-tab="search">Search</button>
+        <button class="nav-btn" data-tab="ingest">Ingest</button>
+        <button class="nav-btn" data-tab="query">Query</button>
+        <button class="nav-btn" data-tab="log">Log</button>
+      </nav>
+
+      <div id="sidebar-stats"></div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main">
+
+      <!-- Explorer -->
+      <section id="tab-explorer" class="tab active">
+        <div id="explorer-layout">
+          <div id="file-tree">
+            <div class="tree-header">
+              <button class="category-btn active" data-cat="">All</button>
+              <button class="category-btn" data-cat="Sources">Sources</button>
+              <button class="category-btn" data-cat="Concepts">Concepts</button>
+              <button class="category-btn" data-cat="Entities">Entities</button>
+            </div>
+            <ul id="page-list"></ul>
+          </div>
+          <div id="page-viewer">
+            <div id="page-viewer-placeholder">
+              <p>Select a page to view its content.</p>
+            </div>
+            <div id="page-content" class="hidden">
+              <div id="page-header">
+                <h2 id="page-title"></h2>
+                <span id="page-category-badge"></span>
+              </div>
+              <div id="page-body"></div>
+              <div id="page-backlinks"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Graph -->
+      <section id="tab-graph" class="tab hidden">
+        <div id="graph-controls">
+          <span id="graph-info">Hover a node to see its title</span>
+          <button id="graph-reset">Reset view</button>
+        </div>
+        <canvas id="graph-canvas"></canvas>
+      </section>
+
+      <!-- Search -->
+      <section id="tab-search" class="tab hidden">
+        <div class="panel">
+          <h2>Search</h2>
+          <div class="input-row">
+            <input id="search-input" type="text" placeholder="Search the wiki…" />
+            <button id="search-btn">Search</button>
+          </div>
+          <div id="search-results"></div>
+        </div>
+      </section>
+
+      <!-- Ingest -->
+      <section id="tab-ingest" class="tab hidden">
+        <div class="panel">
+          <h2>Ingest Source</h2>
+          <p class="hint">Paste a URL or a file path to add it to the wiki.</p>
+          <div class="input-row">
+            <input id="ingest-source" type="text" placeholder="https://… or /path/to/file.pdf" />
+          </div>
+          <div class="option-row">
+            <label><input type="checkbox" id="ingest-dry-run" /> Dry run (preview only)</label>
+          </div>
+          <button id="ingest-btn">Ingest</button>
+          <div id="ingest-result" class="result-box hidden"></div>
+        </div>
+      </section>
+
+      <!-- Query -->
+      <section id="tab-query" class="tab hidden">
+        <div class="panel">
+          <h2>Query</h2>
+          <p class="hint">Ask a question grounded in your wiki content.</p>
+          <textarea id="query-input" rows="3" placeholder="What is…?"></textarea>
+          <div class="input-row">
+            <input id="query-save-as" type="text" placeholder="Save answer as… (optional page path)" />
+            <button id="query-btn">Ask</button>
+          </div>
+          <div id="query-result" class="result-box hidden"></div>
+        </div>
+      </section>
+
+      <!-- Log -->
+      <section id="tab-log" class="tab hidden">
+        <div class="panel">
+          <div class="log-header">
+            <h2>Activity Log</h2>
+            <button id="lint-btn">Run Lint</button>
+          </div>
+          <div id="log-content"></div>
+          <div id="lint-result" class="result-box hidden"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script type="module" src="/static/js/app.js"></script>
+  <script type="module" src="/static/js/graph.js"></script>
+</body>
+</html>

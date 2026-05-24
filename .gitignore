@@ -1,0 +1,14 @@
+*.db
+*.pyc
+__pycache__/
+.env
+*.env.*
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.DS_Store
+lint-*.md
+~/.llm-wiki/
+.claude/
