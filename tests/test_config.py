@@ -17,16 +17,18 @@ class TestGlobalConfigLoad:
         assert cfg.model == "ollama/qwen2.5-coder:7b"
         assert cfg.server_port == 8000
 
-    def test_loads_existing_file(self, patched_global_config):
+    def test_loads_existing_file(self, patched_global_config, tmp_path):
+        vault_path = tmp_path / "a"
+        vault_path.mkdir()
         data = {
-            "vaults": {"A": "/tmp/a"},
+            "vaults": {"A": str(vault_path)},
             "default_vault": "A",
             "model": "gpt-4o",
             "server_port": 9000,
         }
         (patched_global_config / "config.json").write_text(json.dumps(data))
         cfg = GlobalConfig.load()
-        assert cfg.vaults == {"A": "/tmp/a"}
+        assert cfg.vaults == {"A": str(vault_path)}
         assert cfg.default_vault == "A"
         assert cfg.model == "gpt-4o"
         assert cfg.server_port == 9000
@@ -46,14 +48,16 @@ class TestGlobalConfigSave:
         assert saved["vaults"] == {}
         assert saved["model"] == "ollama/qwen2.5-coder:7b"
 
-    def test_save_roundtrip(self, patched_global_config):
+    def test_save_roundtrip(self, patched_global_config, tmp_path):
+        vault_path = tmp_path / "my"
+        vault_path.mkdir()
         cfg = GlobalConfig()
-        cfg.vaults = {"My": "/some/path"}
+        cfg.vaults = {"My": str(vault_path)}
         cfg.default_vault = "My"
         cfg.model = "ollama/llama3"
         cfg.save()
         loaded = GlobalConfig.load()
-        assert loaded.vaults == {"My": "/some/path"}
+        assert loaded.vaults == {"My": str(vault_path)}
         assert loaded.default_vault == "My"
         assert loaded.model == "ollama/llama3"
 
@@ -72,8 +76,10 @@ class TestGlobalConfigRegisterVault:
         assert cfg.default_vault == "First"
 
     def test_persists_vault_to_disk(self, patched_global_config, tmp_path):
+        vault_path = tmp_path / "saved"
+        vault_path.mkdir()
         cfg = GlobalConfig()
-        cfg.register_vault("Saved", tmp_path / "saved")
+        cfg.register_vault("Saved", vault_path)
         reloaded = GlobalConfig.load()
         assert "Saved" in reloaded.vaults
 
@@ -146,3 +152,54 @@ class TestResolveModel:
         cfg.model = "gpt-4o"
         cfg.save()
         assert resolve_model(None) == "gpt-4o"
+
+
+# ── GlobalConfig.reconcile_vaults ─────────────────────────────────────────────
+
+
+class TestReconcileVaults:
+    def test_drops_missing_vault(self, tmp_path):
+        cfg = GlobalConfig()
+        cfg.vaults = {"Gone": str(tmp_path / "nonexistent")}
+        dropped = cfg.reconcile_vaults()
+        assert "Gone" in dropped
+        assert "Gone" not in cfg.vaults
+
+    def test_keeps_existing_vault(self, tmp_path):
+        existing = tmp_path / "vault"
+        existing.mkdir()
+        cfg = GlobalConfig()
+        cfg.vaults = {"Present": str(existing)}
+        dropped = cfg.reconcile_vaults()
+        assert dropped == []
+        assert "Present" in cfg.vaults
+
+    def test_clears_default_when_only_vault_dropped(self, tmp_path):
+        cfg = GlobalConfig()
+        cfg.vaults = {"Gone": str(tmp_path / "nonexistent")}
+        cfg.default_vault = "Gone"
+        cfg.reconcile_vaults()
+        assert cfg.default_vault is None
+
+    def test_sets_default_to_remaining_vault(self, tmp_path):
+        existing = tmp_path / "vault"
+        existing.mkdir()
+        cfg = GlobalConfig()
+        cfg.vaults = {"Gone": str(tmp_path / "nonexistent"), "Present": str(existing)}
+        cfg.default_vault = "Gone"
+        cfg.reconcile_vaults()
+        assert cfg.default_vault == "Present"
+
+    def test_load_auto_reconciles_and_saves(self, patched_global_config):
+        data = {
+            "vaults": {"Stale": "/nonexistent/path/to/vault"},
+            "default_vault": "Stale",
+            "model": "ollama/qwen2.5-coder:7b",
+            "server_port": 8000,
+        }
+        (patched_global_config / "config.json").write_text(json.dumps(data))
+        cfg = GlobalConfig.load()
+        assert "Stale" not in cfg.vaults
+        assert cfg.default_vault is None
+        saved = json.loads((patched_global_config / "config.json").read_text())
+        assert "Stale" not in saved["vaults"]

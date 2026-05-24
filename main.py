@@ -104,6 +104,27 @@ def use(vault_name: str):
     console.print(f"[green]✓[/green] Default vault set to [bold]{vault_name}[/bold]")
 
 
+@cli.command()
+@click.argument("vault_name")
+def unregister(vault_name: str):
+    """Remove a vault from the registry (files on disk are left untouched)."""
+    config = GlobalConfig.load()
+    if vault_name not in config.vaults:
+        console.print(
+            f"[red]Vault '{vault_name}' is not registered. Run `llm-wiki list` to see vaults.[/red]"
+        )
+        raise SystemExit(1) from None
+    del config.vaults[vault_name]
+    if config.default_vault == vault_name:
+        config.default_vault = next(iter(config.vaults), None)
+    config.save()
+    console.print(f"[green]✓[/green] Vault [bold]{vault_name}[/bold] unregistered.")
+    if config.default_vault:
+        console.print(f"  Default is now [bold]{config.default_vault}[/bold]")
+    else:
+        console.print("  [dim]No default vault set. Run `llm-wiki use <name>` to set one.[/dim]")
+
+
 # ---------------------------------------------------------------------------
 # Model configuration
 # ---------------------------------------------------------------------------

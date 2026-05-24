@@ -20,16 +20,40 @@ class GlobalConfig:
 
     @classmethod
     def load(cls) -> GlobalConfig:
-        """Load config from ~/.llm-wiki/config.json, returning defaults if the file is absent."""
+        """Load config from ~/.llm-wiki/config.json, returning defaults if the file is absent.
+
+        Automatically drops any registered vault whose path no longer exists on disk
+        and updates the file if anything was removed.
+        """
         if GLOBAL_CONFIG_FILE.exists():
             data = json.loads(GLOBAL_CONFIG_FILE.read_text())
-            return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-        return cls()
+            instance = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        else:
+            instance = cls()
+        if instance.reconcile_vaults():
+            instance.save()
+        return instance
 
     def save(self) -> None:
         """Persist the current config to ~/.llm-wiki/config.json, creating the directory if needed."""
         GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         GLOBAL_CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
+
+    def reconcile_vaults(self) -> list[str]:
+        """Drop registered vaults whose paths no longer exist on disk.
+
+        If the current default vault is removed, the default is reassigned to the
+        first remaining vault, or set to ``None`` when no vaults remain.
+
+        Returns:
+            Names of vaults that were removed from the registry.
+        """
+        dropped = [name for name, path in self.vaults.items() if not Path(path).exists()]
+        for name in dropped:
+            del self.vaults[name]
+        if self.default_vault in dropped:
+            self.default_vault = next(iter(self.vaults), None)
+        return dropped
 
     def register_vault(self, name: str, path: Path) -> None:
         """Add a vault to the registry and save. Sets it as default if it is the first vault.
