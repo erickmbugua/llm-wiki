@@ -14,7 +14,13 @@ import requests
 from bs4 import BeautifulSoup
 
 from .config import resolve_model
-from .database import get_db, get_pending_queue, mark_queue_item, reconcile, search
+from .database import (
+    get_db,
+    get_pending_queue,
+    mark_queue_item,
+    partial_reconcile,
+    search,
+)
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +45,9 @@ def ingest_source(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Extract text from a source, call the LLM to generate wiki pages, and write them to disk.
+
+    After writing, only the newly written paths are re-indexed via ``partial_reconcile``
+    rather than a full vault scan, keeping large vaults fast.
 
     Args:
         vault_path: Root directory of the vault.
@@ -84,7 +93,8 @@ def ingest_source(
         written = _write_pages(wiki_root, result)
         conn = get_db(vault_path)
         try:
-            reconcile(conn, wiki_root)
+            written_paths = [wiki_root / fp for fp in written]
+            partial_reconcile(conn, wiki_root, written_paths)
         finally:
             conn.close()
         _append_log(vault_path, display_name, written)

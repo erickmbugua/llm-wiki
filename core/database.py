@@ -266,6 +266,41 @@ def reconcile(conn: sqlite3.Connection, wiki_root: Path) -> dict[str, int]:
     return {"added": added, "updated": updated, "removed": removed}
 
 
+def partial_reconcile(
+    conn: sqlite3.Connection, wiki_root: Path, changed_paths: list[Path]
+) -> dict[str, int]:
+    """Re-index only the given paths and rebuild backlinks once.
+
+    Use this after ingest when the exact set of changed files is known.
+    For a full sync from disk, use ``reconcile()`` instead.
+
+    Args:
+        conn: Open database connection.
+        wiki_root: Root of the wiki directory.
+        changed_paths: Absolute paths to ``.md`` files that were just written.
+
+    Returns:
+        A dict with integer counts: ``{"added": int, "updated": int, "removed": int}``.
+    """
+    existing = {
+        row["file_path"]: row["mtime"] for row in conn.execute("SELECT file_path, mtime FROM pages")
+    }
+    added = updated = 0
+    for md_path in changed_paths:
+        if not md_path.exists():
+            continue
+        rel = str(md_path.relative_to(wiki_root))
+        mtime = md_path.stat().st_mtime
+        if rel not in existing:
+            upsert_page(conn, wiki_root, md_path)
+            added += 1
+        elif abs(mtime - existing[rel]) > 0.01:
+            upsert_page(conn, wiki_root, md_path)
+            updated += 1
+    _rebuild_backlinks(conn)
+    return {"added": added, "updated": updated, "removed": 0}
+
+
 def _rebuild_backlinks(conn: sqlite3.Connection) -> None:
     """Rebuild the ``backlinks`` JSON column for every page by scanning all ``[[wikilink]]`` references.
 

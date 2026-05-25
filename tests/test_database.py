@@ -14,6 +14,7 @@ from core.database import (
     get_pending_queue,
     list_pages,
     mark_queue_item,
+    partial_reconcile,
     queue_raw_file,
     reconcile,
     search,
@@ -315,3 +316,63 @@ class TestIngestQueue:
         ).fetchone()
         assert row["status"] == "failed"
         assert row["error"] == "parse error"
+
+
+# ── partial_reconcile ─────────────────────────────────────────────────────────
+
+
+class TestPartialReconcile:
+    def test_indexes_only_given_files(self, tmp_vault):
+        """Only the explicitly passed paths are re-indexed; pre-existing others are untouched."""
+        wiki = tmp_vault / "wiki"
+        conn = get_db(tmp_vault)
+
+        # Pre-index a page that will NOT be in the changed_paths list
+        pre = wiki / "Concepts" / "Existing.md"
+        pre.write_text("---\ntitle: Existing\ntags: []\n---\nAlready indexed.\n")
+        upsert_page(conn, wiki, pre)
+        old_mtime = conn.execute(
+            "SELECT mtime FROM pages WHERE file_path=?", ("Concepts/Existing.md",)
+        ).fetchone()["mtime"]
+
+        # Write two new files that will be in changed_paths
+        new_a = wiki / "Concepts" / "Alpha.md"
+        new_b = wiki / "Concepts" / "Beta.md"
+        new_a.write_text("---\ntitle: Alpha\ntags: []\n---\nFirst new page.\n")
+        new_b.write_text("---\ntitle: Beta\ntags: []\n---\nSecond new page.\n")
+
+        stats = partial_reconcile(conn, wiki, [new_a, new_b])
+        conn.close()
+
+        assert stats["added"] == 2
+        assert stats["updated"] == 0
+
+        conn2 = get_db(tmp_vault)
+        assert get_page(conn2, "Concepts/Alpha.md") is not None
+        assert get_page(conn2, "Concepts/Beta.md") is not None
+        # Pre-existing page mtime is unchanged (was not re-indexed)
+        new_mtime = conn2.execute(
+            "SELECT mtime FROM pages WHERE file_path=?", ("Concepts/Existing.md",)
+        ).fetchone()["mtime"]
+        assert new_mtime == old_mtime
+        conn2.close()
+
+    def test_rebuilds_backlinks(self, tmp_vault):
+        """Backlinks column is populated for pages referencing each other."""
+        wiki = tmp_vault / "wiki"
+        conn = get_db(tmp_vault)
+
+        src = wiki / "Concepts" / "Source.md"
+        tgt = wiki / "Concepts" / "Target.md"
+        src.write_text("---\ntitle: Source\ntags: []\n---\nSee [[Target]] for details.\n")
+        tgt.write_text("---\ntitle: Target\ntags: []\n---\nTarget page.\n")
+
+        partial_reconcile(conn, wiki, [src, tgt])
+
+        tgt_row = conn.execute(
+            "SELECT backlinks FROM pages WHERE file_path=?", ("Concepts/Target.md",)
+        ).fetchone()
+        assert tgt_row is not None
+        backlinks = json.loads(tgt_row["backlinks"] or "[]")
+        assert "Concepts/Source.md" in backlinks
+        conn.close()
