@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -11,6 +12,8 @@ import frontmatter
 import yaml
 
 from .config import VAULT_DB_FILE, VAULT_INTERNAL_DIR
+
+log = logging.getLogger(__name__)
 
 
 def get_db(vault_path: Path) -> sqlite3.Connection:
@@ -304,13 +307,28 @@ def partial_reconcile(
 def _rebuild_backlinks(conn: sqlite3.Connection) -> None:
     """Rebuild the ``backlinks`` JSON column for every page by scanning all ``[[wikilink]]`` references.
 
+    When two pages share the same stem (e.g. ``Concepts/Python.md`` and
+    ``Entities/Python.md``), the first path in sorted order wins and a WARNING is
+    logged so the user knows to rename one of the files.
+
     Args:
         conn: Open database connection. All pages are rewritten in a single transaction.
     """
     rows = conn.execute("SELECT id, file_path, content FROM pages").fetchall()
-    title_to_path = {
-        r["file_path"].rsplit("/", 1)[-1].replace(".md", ""): r["file_path"] for r in rows
-    }
+    title_to_path: dict[str, str] = {}
+    for r in sorted(rows, key=lambda r: r["file_path"]):
+        stem = r["file_path"].rsplit("/", 1)[-1].replace(".md", "")
+        if stem in title_to_path:
+            log.warning(
+                "Wikilink collision: [[%s]] matches both '%s' and '%s'; "
+                "using '%s'. Rename one page to disambiguate.",
+                stem,
+                title_to_path[stem],
+                r["file_path"],
+                title_to_path[stem],
+            )
+        else:
+            title_to_path[stem] = r["file_path"]
     backlink_map: dict[str, list[str]] = {r["file_path"]: [] for r in rows}
 
     for row in rows:

@@ -8,6 +8,7 @@ import pytest
 from core.database import (
     _extract_summary,
     _infer_category,
+    _rebuild_backlinks,
     delete_page,
     get_db,
     get_page,
@@ -375,4 +376,43 @@ class TestPartialReconcile:
         assert tgt_row is not None
         backlinks = json.loads(tgt_row["backlinks"] or "[]")
         assert "Concepts/Source.md" in backlinks
+        conn.close()
+
+
+# ── _rebuild_backlinks collision detection ────────────────────────────────────
+
+
+class TestRebuildBacklinksCollision:
+    def test_collision_logs_warning_and_is_stable(self, tmp_vault, caplog):
+        """Two pages with the same stem must not raise; a WARNING must be emitted."""
+        import logging
+
+        wiki = tmp_vault / "wiki"
+        conn = get_db(tmp_vault)
+
+        (wiki / "Concepts").mkdir(parents=True, exist_ok=True)
+        (wiki / "Entities").mkdir(parents=True, exist_ok=True)
+        (wiki / "Concepts" / "Python.md").write_text(
+            "---\ntitle: Python\ntags: []\n---\nConcept page.\n"
+        )
+        (wiki / "Entities" / "Python.md").write_text(
+            "---\ntitle: Python\ntags: []\n---\nEntity page.\n"
+        )
+        upsert_page(conn, wiki, wiki / "Concepts" / "Python.md")
+        upsert_page(conn, wiki, wiki / "Entities" / "Python.md")
+
+        with caplog.at_level(logging.WARNING, logger="core.database"):
+            _rebuild_backlinks(conn)  # must not raise
+
+        assert any("collision" in msg.lower() or "Python" in msg for msg in caplog.messages)
+
+        # Result must be stable — calling again produces identical backlinks
+        first = conn.execute("SELECT file_path, backlinks FROM pages ORDER BY file_path").fetchall()
+        _rebuild_backlinks(conn)
+        second = conn.execute(
+            "SELECT file_path, backlinks FROM pages ORDER BY file_path"
+        ).fetchall()
+        assert [(r["file_path"], r["backlinks"]) for r in first] == [
+            (r["file_path"], r["backlinks"]) for r in second
+        ]
         conn.close()
