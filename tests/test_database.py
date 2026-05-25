@@ -9,16 +9,20 @@ from core.database import (
     _extract_summary,
     _infer_category,
     _rebuild_backlinks,
+    create_job,
     delete_page,
     get_db,
+    get_job,
     get_page,
     get_pending_queue,
+    list_jobs,
     list_pages,
     mark_queue_item,
     partial_reconcile,
     queue_raw_file,
     reconcile,
     search,
+    update_job_status,
     upsert_page,
 )
 
@@ -416,3 +420,60 @@ class TestRebuildBacklinksCollision:
             (r["file_path"], r["backlinks"]) for r in second
         ]
         conn.close()
+
+
+# ── ingest_jobs ───────────────────────────────────────────────────────────────
+
+
+class TestIngestJobs:
+    def test_create_job_and_get_job_round_trip(self, db_conn):
+        create_job(db_conn, job_id="job-1", vault="TestVault", source="/raw/doc.pdf")
+        job = get_job(db_conn, "job-1")
+        assert job is not None
+        assert job["id"] == "job-1"
+        assert job["vault"] == "TestVault"
+        assert job["source"] == "/raw/doc.pdf"
+        assert job["status"] == "pending"
+        assert job["pages_written"] == []
+
+    def test_get_job_returns_none_for_missing_id(self, db_conn):
+        assert get_job(db_conn, "nonexistent-id") is None
+
+    def test_update_job_status_running_sets_started_at(self, db_conn):
+        create_job(db_conn, job_id="job-2", vault="V", source="src")
+        update_job_status(db_conn, "job-2", "running")
+        job = get_job(db_conn, "job-2")
+        assert job is not None
+        assert job["status"] == "running"
+        assert job["started_at"] is not None
+        assert job["finished_at"] is None
+
+    def test_update_job_status_done_sets_finished_at_and_pages(self, db_conn):
+        create_job(db_conn, job_id="job-3", vault="V", source="src")
+        update_job_status(db_conn, "job-3", "running")
+        update_job_status(db_conn, "job-3", "done", pages_written=["Sources/X.md"])
+        job = get_job(db_conn, "job-3")
+        assert job is not None
+        assert job["status"] == "done"
+        assert job["finished_at"] is not None
+        assert job["pages_written"] == ["Sources/X.md"]
+
+    def test_update_job_status_failed_stores_error(self, db_conn):
+        create_job(db_conn, job_id="job-4", vault="V", source="src")
+        update_job_status(db_conn, "job-4", "failed", error="LLM timeout")
+        job = get_job(db_conn, "job-4")
+        assert job is not None
+        assert job["status"] == "failed"
+        assert job["error"] == "LLM timeout"
+
+    def test_list_jobs_newest_first(self, db_conn):
+        create_job(db_conn, job_id="old-job", vault="V", source="old")
+        create_job(db_conn, job_id="new-job", vault="V", source="new")
+        jobs = list_jobs(db_conn)
+        ids = [j["id"] for j in jobs]
+        assert ids.index("new-job") < ids.index("old-job")
+
+    def test_list_jobs_respects_limit(self, db_conn):
+        for i in range(5):
+            create_job(db_conn, job_id=f"job-{i}", vault="V", source=f"src-{i}")
+        assert len(list_jobs(db_conn, limit=3)) == 3

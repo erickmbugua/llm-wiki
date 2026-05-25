@@ -15,6 +15,7 @@ import argparse
 import logging
 import signal
 import sys
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -22,43 +23,26 @@ from pathlib import Path
 import uvicorn
 
 from core.config import GlobalConfig, VaultConfig
-from core.ingest import ingest_queued
+from core.database import create_job, get_db
+from core.server import _run_ingest_job, register_vault_executor
 from core.watcher import VaultWatcher
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
 
-def _run_ingest(vpath: Path, vname: str) -> None:
-    """Drain the ingest queue for a vault, logging a summary when done.
-
-    Intended to run inside a ThreadPoolExecutor worker — never on the event loop.
-
-    Args:
-        vpath: Root directory of the vault.
-        vname: Human-readable vault name used in log output.
-    """
-    try:
-        results = ingest_queued(vpath, vname)
-        done = sum(1 for r in results if r["status"] == "done")
-        failed = sum(1 for r in results if r["status"] == "failed")
-        log.info("Auto-ingest '%s': %d done, %d failed", vname, done, failed)
-    except Exception:
-        log.exception("Auto-ingest failed unexpectedly for vault '%s'", vname)
-
-
 def _make_ingest_callback(
     vpath: Path, vname: str, executor: ThreadPoolExecutor
 ) -> Callable[[str], None]:
-    """Return an on_file callback that submits a queue-drain task to the executor.
+    """Return an on_file callback that creates an ingest job and submits it to the executor.
 
     The callback is called from the watchdog thread whenever a file lands in raw/.
-    It schedules _run_ingest on the executor without blocking the watchdog thread.
+    Each detected file gets its own job record so the dashboard can display its progress.
     Using max_workers=1 ensures LLM calls are serialised per vault.
 
     Args:
         vpath: Root directory of the vault.
-        vname: Human-readable vault name forwarded to _run_ingest.
+        vname: Human-readable vault name forwarded to the ingest worker.
         executor: Single-worker ThreadPoolExecutor dedicated to this vault.
 
     Returns:
@@ -71,7 +55,13 @@ def _make_ingest_callback(
             Path(file_path).name,
             vname,
         )
-        executor.submit(_run_ingest, vpath, vname)
+        job_id = str(uuid.uuid4())
+        conn = get_db(vpath)
+        try:
+            create_job(conn, job_id=job_id, vault=vname, source=file_path)
+        finally:
+            conn.close()
+        executor.submit(_run_ingest_job, vpath, vname, file_path, job_id, False)
 
     return _callback
 
@@ -105,6 +95,7 @@ def main() -> None:
         # max_workers=1 serialises LLM calls so a local 7B model isn't overloaded.
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"ingest-{vname}")
         executors.append(executor)
+        register_vault_executor(vname, executor)
 
         callback = _make_ingest_callback(vpath, effective_name, executor)
         w = VaultWatcher(vpath, on_file=callback)

@@ -1,16 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import GlobalConfig, VaultConfig
-from .database import get_db, list_pages, reconcile, search
+from .database import (
+    create_job,
+    get_db,
+    get_job,
+    list_jobs,
+    list_pages,
+    reconcile,
+    search,
+    update_job_status,
+)
 from .ingest import ingest_source
 from .lint import lint_vault
 from .query import query_wiki
@@ -23,6 +36,35 @@ app = FastAPI(title="llm-wiki", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(HERE / "app" / "static")), name="static")
 
 _config_cache: GlobalConfig | None = None
+
+# Per-vault executors registered by main_server.py at startup.
+_vault_executors: dict[str, ThreadPoolExecutor] = {}
+
+
+def register_vault_executor(vault_name: str, executor: ThreadPoolExecutor) -> None:
+    """Register the background executor for a vault.
+
+    Called by main_server.py at startup so that API ingest jobs can be submitted
+    to the same single-worker executor used by the file watcher.
+
+    Args:
+        vault_name: Registered vault name (key in GlobalConfig.vaults).
+        executor: Single-worker ThreadPoolExecutor dedicated to this vault.
+    """
+    _vault_executors[vault_name] = executor
+
+
+def _get_executor(vault_name: str) -> ThreadPoolExecutor | None:
+    """Return the registered executor for a vault, or None if not yet registered.
+
+    Args:
+        vault_name: Registered vault name.
+
+    Returns:
+        The executor for this vault, or ``None`` when called outside main_server.py
+        (e.g. in tests or direct uvicorn invocations).
+    """
+    return _vault_executors.get(vault_name)
 
 
 def _get_config() -> GlobalConfig:
@@ -237,16 +279,117 @@ class IngestRequest(BaseModel):
     dry_run: bool = False
 
 
-@app.post("/api/vaults/{vault_name}/ingest")
-def api_ingest(vault_name: str, req: IngestRequest):
-    """Ingest a source URL or file path into the vault, with optional dry-run mode."""
+def _run_ingest_job(vpath: Path, vname: str, source: str, job_id: str, dry_run: bool) -> None:
+    """Execute an ingest job and update its DB record with the result.
+
+    Intended to run inside a ThreadPoolExecutor worker — never on the event loop.
+    Sets status to ``"running"`` before the LLM call, then ``"done"`` or ``"failed"``.
+
+    Args:
+        vpath: Root directory of the vault.
+        vname: Human-readable vault name forwarded to ``ingest_source``.
+        source: File path or URL being ingested.
+        job_id: UUID of the job record to update.
+        dry_run: When True, no pages are written to disk.
+    """
+    conn = get_db(vpath)
+    try:
+        update_job_status(conn, job_id, "running")
+        result = ingest_source(vpath, source, vname, dry_run=dry_run)
+        update_job_status(
+            conn,
+            job_id,
+            "done",
+            pages_written=result.get("pages_written", []),
+        )
+    except Exception as e:
+        update_job_status(conn, job_id, "failed", error=str(e))
+        log.error("Ingest job %s failed: %s", job_id, e)
+    finally:
+        conn.close()
+
+
+@app.post("/api/vaults/{vault_name}/ingest", status_code=202)
+def api_ingest(vault_name: str, req: IngestRequest) -> JSONResponse:
+    """Enqueue an ingest job and return its ID immediately (HTTP 202).
+
+    The job runs in the vault's background executor. Poll
+    ``GET /api/vaults/{vault}/jobs/{job_id}`` or stream
+    ``GET /api/vaults/{vault}/jobs/{job_id}/stream`` for status.
+    """
     vname, vpath = _get_vault(vault_name)
     vcfg = VaultConfig.load(vpath)
+    effective_name = vcfg.name or vname
+
+    job_id = str(uuid.uuid4())
+    conn = get_db(vpath)
     try:
-        result = ingest_source(vpath, req.source, vcfg.name or vname, dry_run=req.dry_run)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    return result
+        create_job(conn, job_id=job_id, vault=vname, source=req.source)
+    finally:
+        conn.close()
+
+    executor = _get_executor(vname) or ThreadPoolExecutor(max_workers=1)
+    executor.submit(_run_ingest_job, vpath, effective_name, req.source, job_id, req.dry_run)
+
+    return JSONResponse({"job_id": job_id, "status": "pending"}, status_code=202)
+
+
+# ---------------------------------------------------------------------------
+# Job status API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/vaults/{vault_name}/jobs/{job_id}")
+async def api_get_job(vault_name: str, job_id: str) -> dict[str, Any]:
+    """Return the current status of an ingest job."""
+    _, vpath = _get_vault(vault_name)
+    conn = get_db(vpath)
+    try:
+        job = get_job(conn, job_id)
+    finally:
+        conn.close()
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return job
+
+
+@app.get("/api/vaults/{vault_name}/jobs/{job_id}/stream")
+async def api_stream_job(vault_name: str, job_id: str) -> StreamingResponse:
+    """SSE stream that emits the job record every second until the job reaches a terminal state.
+
+    The client should open an ``EventSource`` on this URL. Each event is the full job JSON.
+    The stream closes automatically when status is ``"done"`` or ``"failed"``.
+    """
+    _, vpath = _get_vault(vault_name)
+
+    async def _generator():
+        while True:
+            conn = get_db(vpath)
+            try:
+                job = get_job(conn, job_id)
+            finally:
+                conn.close()
+            if job is None:
+                yield "event: error\ndata: job not found\n\n"
+                return
+            yield f"data: {json.dumps(job)}\n\n"
+            if job["status"] in ("done", "failed"):
+                return
+            await asyncio.sleep(1)
+
+    return StreamingResponse(_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/vaults/{vault_name}/jobs")
+async def api_list_jobs(vault_name: str) -> dict[str, Any]:
+    """Return the 20 most recent ingest jobs for a vault, newest first."""
+    _, vpath = _get_vault(vault_name)
+    conn = get_db(vpath)
+    try:
+        jobs = list_jobs(conn)
+    finally:
+        conn.close()
+    return {"jobs": jobs}
 
 
 class QueryRequest(BaseModel):

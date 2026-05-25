@@ -206,36 +206,68 @@ class TestApiReconcile:
 
 
 class TestApiIngest:
-    def test_calls_ingest_source_and_returns_result(self, client, vault_name):
-        with patch(
-            "core.server.ingest_source",
-            return_value={
-                "source_page": {"file_path": "Sources/Via_API.md", "content": "..."},
-                "page_updates": [],
-                "pages_written": ["Sources/Via_API.md"],
-            },
-        ) as mock_ingest:
+    def test_returns_202_with_job_id(self, client, vault_name):
+        """POST ingest must return HTTP 202 and a job_id immediately."""
+        with patch("core.server._run_ingest_job"):
             r = client.post(
                 f"/api/vaults/{vault_name}/ingest",
                 json={"source": "https://example.com", "dry_run": False},
             )
-        assert r.status_code == 200
-        mock_ingest.assert_called_once()
+        assert r.status_code == 202
+        data = r.json()
+        assert "job_id" in data
+        assert data["status"] == "pending"
 
-    def test_dry_run_flag_passed_through(self, client, vault_name):
-        with patch(
-            "core.server.ingest_source",
-            return_value={
-                "source_page": {"file_path": "Sources/X.md", "content": ""},
-                "page_updates": [],
-                "pages_written": [],
-            },
-        ) as mock_ingest:
+    def test_job_record_created_as_pending(self, client, vault_name, populated_vault):
+        """After POST, the job should exist in the DB with status=pending."""
+        with patch("core.server._run_ingest_job"):
+            r = client.post(
+                f"/api/vaults/{vault_name}/ingest",
+                json={"source": "https://example.com"},
+            )
+        job_id = r.json()["job_id"]
+        r2 = client.get(f"/api/vaults/{vault_name}/jobs/{job_id}")
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "pending"
+
+    def test_dry_run_flag_forwarded_to_worker(self, client, vault_name):
+        """The dry_run flag should be passed to _run_ingest_job."""
+        with patch("core.server._run_ingest_job") as mock_worker:
             client.post(
                 f"/api/vaults/{vault_name}/ingest",
                 json={"source": "/tmp/test.txt", "dry_run": True},
             )
-        assert mock_ingest.call_args.kwargs.get("dry_run") is True
+        # Give the thread a moment to submit (client.post blocks until 202 is sent)
+        # _run_ingest_job is patched so it returns instantly; check the call args
+        mock_worker.assert_called_once()
+        call_args = mock_worker.call_args
+        # dry_run is the 5th positional arg: (vpath, vname, source, job_id, dry_run)
+        assert call_args.args[4] is True
+
+
+# ── /api/vaults/{name}/jobs ──────────────────────────────────────────────────
+
+
+class TestApiJobs:
+    def test_get_job_404_for_unknown_id(self, client, vault_name):
+        r = client.get(f"/api/vaults/{vault_name}/jobs/nonexistent-id")
+        assert r.status_code == 404
+
+    def test_list_jobs_returns_list(self, client, vault_name):
+        r = client.get(f"/api/vaults/{vault_name}/jobs")
+        assert r.status_code == 200
+        assert "jobs" in r.json()
+        assert isinstance(r.json()["jobs"], list)
+
+    def test_list_jobs_includes_created_job(self, client, vault_name):
+        with patch("core.server._run_ingest_job"):
+            client.post(
+                f"/api/vaults/{vault_name}/ingest",
+                json={"source": "https://example.com"},
+            )
+        r = client.get(f"/api/vaults/{vault_name}/jobs")
+        assert r.status_code == 200
+        assert len(r.json()["jobs"]) >= 1
 
 
 # ── /api/vaults/{name}/query ─────────────────────────────────────────────────

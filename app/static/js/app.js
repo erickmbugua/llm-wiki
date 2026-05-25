@@ -159,31 +159,90 @@ function setupIngest() {
     const btn = document.getElementById('ingest-btn');
     const result = document.getElementById('ingest-result');
     btn.disabled = true;
-    btn.textContent = 'Ingesting…';
+    btn.textContent = 'Queued…';
     result.classList.add('hidden');
     result.classList.remove('error');
 
     try {
+      // POST returns 202 + {job_id} immediately; stream progress via SSE
       const data = await api(`/api/vaults/${currentVault}/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source, dry_run: dryRun }),
       });
-      const written = data.pages_written || [];
-      result.textContent = dryRun
-        ? `[dry-run] Would create:\n${data.source_page?.file_path || '?'}\n` +
-          (data.page_updates || []).map(u => `  ${u.action}: ${u.file_path}`).join('\n')
-        : `✓ Wrote ${written.length} page(s):\n` + written.join('\n');
-      if (!dryRun) { await refreshAll(); }
+      const jobId = data.job_id;
+      result.classList.remove('hidden');
+      result.textContent = `Job ${jobId.slice(0, 8)}… queued — waiting for ingest to start…`;
+      await streamJobProgress(jobId, result, dryRun);
+      if (!dryRun) await refreshAll();
+      await loadRecentJobs();
     } catch (e) {
       result.classList.add('error');
       result.textContent = e.message;
-    } finally {
       result.classList.remove('hidden');
+    } finally {
       btn.disabled = false;
       btn.textContent = 'Ingest';
     }
   });
+
+  loadRecentJobs();
+}
+
+async function streamJobProgress(jobId, resultEl, dryRun) {
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(
+      `/api/vaults/${currentVault}/jobs/${jobId}/stream`
+    );
+    es.onmessage = (e) => {
+      const job = JSON.parse(e.data);
+      const elapsed = job.started_at
+        ? ((Date.now() / 1000) - job.started_at).toFixed(0) + 's'
+        : 'queued';
+      resultEl.textContent = `[${job.status}] ${job.source} (${elapsed})`;
+      if (job.status === 'done') {
+        const written = job.pages_written || [];
+        resultEl.textContent = dryRun
+          ? `[dry-run] Job ${jobId.slice(0, 8)} complete`
+          : `✓ Wrote ${written.length} page(s):\n` + written.join('\n');
+        es.close();
+        resolve();
+      } else if (job.status === 'failed') {
+        resultEl.classList.add('error');
+        resultEl.textContent = `✗ Ingest failed: ${job.error || 'unknown error'}`;
+        es.close();
+        reject(new Error(job.error || 'ingest failed'));
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      reject(new Error('SSE connection lost'));
+    };
+  });
+}
+
+async function loadRecentJobs() {
+  if (!currentVault) return;
+  try {
+    const data = await api(`/api/vaults/${currentVault}/jobs`);
+    const panel = document.getElementById('recent-jobs');
+    if (!panel) return;
+    if (!data.jobs.length) {
+      panel.innerHTML = '<p style="color:var(--text-dim)">No recent jobs.</p>';
+      return;
+    }
+    panel.innerHTML = data.jobs.map(j => {
+      const statusClass = j.status === 'done' ? 'color:var(--accent)' :
+                          j.status === 'failed' ? 'color:#e06c75' : 'color:var(--text-dim)';
+      const pages = j.pages_written?.length ? `${j.pages_written.length} page(s)` : '';
+      return `<div class="job-row">
+        <span style="${statusClass}">[${j.status}]</span>
+        <span title="${j.source}">${j.source.split('/').pop()}</span>
+        ${pages ? `<span>${pages}</span>` : ''}
+        ${j.error ? `<span style="color:#e06c75" title="${j.error}">⚠</span>` : ''}
+      </div>`;
+    }).join('');
+  } catch (_) { /* jobs panel is optional */ }
 }
 
 // ─── Query ────────────────────────────────────────────────────────────────
@@ -263,6 +322,7 @@ async function api(url, opts = {}) {
   }
   return res.json();
 }
+
 
 function markdownToHtml(md) {
   // Minimal markdown renderer (headings, bold, italic, code, links, wikilinks, paragraphs)
