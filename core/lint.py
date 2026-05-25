@@ -11,6 +11,7 @@ from typing import Any
 import litellm
 
 from .config import resolve_model
+from .constants import WIKI_CATEGORIES
 from .db import get_db, list_pages, reconcile
 
 log = logging.getLogger(__name__)
@@ -132,7 +133,7 @@ def _llm_lint(vault_path: Path, wiki_root: Path, pages: list[dict]) -> str:
 
     # Sample a set of pages weighted toward Concepts and Sources
     sample = sorted(
-        [p for p in pages if p["category"] in ("Sources", "Concepts")],
+        [p for p in pages if p["category"] in WIKI_CATEGORIES - {"Entities"}],
         key=lambda p: -len(p.get("summary") or ""),
     )[:CONTRADICTION_SAMPLE]
     if not sample:

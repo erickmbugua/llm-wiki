@@ -341,6 +341,7 @@ pages: list[str] = [p.extract_text() or "" for p in reader.pages]  # pyright: ig
 llm-wiki/
 ├── core/
 │   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars(), resolve_chunk_config(), resolve_embedding_config()
+│   ├── constants.py   # WIKI_CATEGORIES — single source of truth for top-level wiki directory names
 │   ├── embeddings.py  # compute_embedding() — litellm embedding call, returns list[float]
 │   ├── extraction.py  # _extract_text(), _fetch_url(), _extract_pdf(), _extract_docx(), SOURCE_CHAR_LIMIT
 │   ├── chunking.py    # _chunk_text(), _summarize_chunks() — map-reduce for large docs

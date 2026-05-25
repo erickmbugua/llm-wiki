@@ -5,9 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from .config import VAULT_INTERNAL_DIR, VaultConfig
+from .constants import WIKI_CATEGORIES
 from .db import get_db, list_pages
-
-WIKI_SUBDIRS = ["Sources", "Concepts", "Entities"]
 
 
 def init_vault(vault_path: Path, name: str) -> None:
@@ -28,7 +27,7 @@ def init_vault(vault_path: Path, name: str) -> None:
 
     wiki = vault_path / "wiki"
     wiki.mkdir(exist_ok=True)
-    for subdir in WIKI_SUBDIRS:
+    for subdir in sorted(WIKI_CATEGORIES):
         (wiki / subdir).mkdir(exist_ok=True)
 
     _write_if_missing(wiki / "index.md", _index_template())
@@ -58,7 +57,7 @@ def vault_stats(vault_path: Path) -> dict[str, Any]:
     pages = list(wiki.rglob("*.md")) if wiki.exists() else []
     raw_files = list((vault_path / "raw").iterdir()) if (vault_path / "raw").exists() else []
     categories: dict[str, int] = {}
-    for subdir in WIKI_SUBDIRS:
+    for subdir in sorted(WIKI_CATEGORIES):
         categories[subdir] = (
             len(list((wiki / subdir).glob("*.md"))) if (wiki / subdir).exists() else 0
         )

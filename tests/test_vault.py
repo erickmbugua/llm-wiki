@@ -2,7 +2,8 @@
 
 from unittest.mock import patch
 
-from core.vault import WIKI_SUBDIRS, init_vault, rebuild_index, vault_stats
+from core.constants import WIKI_CATEGORIES
+from core.vault import init_vault, rebuild_index, vault_stats
 
 
 class TestInitVault:
@@ -12,7 +13,7 @@ class TestInitVault:
 
     def test_creates_wiki_subdirectories(self, tmp_path):
         init_vault(tmp_path / "v", "V")
-        for subdir in WIKI_SUBDIRS:
+        for subdir in WIKI_CATEGORIES:
             assert (tmp_path / "v" / "wiki" / subdir).is_dir()
 
     def test_creates_index_log_schema(self, tmp_path):

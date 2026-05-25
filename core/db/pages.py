@@ -11,6 +11,8 @@ import frontmatter
 import sqlite_vec  # pyright: ignore[reportMissingModuleSource]
 import yaml
 
+from ..constants import WIKI_CATEGORIES
+
 log = logging.getLogger(__name__)
 
 
@@ -137,7 +139,7 @@ def _infer_category(rel_path: str) -> str:
         otherwise ``"root"``.
     """
     parts = rel_path.split("/")
-    if len(parts) > 1 and parts[0] in ("Sources", "Concepts", "Entities"):
+    if len(parts) > 1 and parts[0] in WIKI_CATEGORIES:
         return parts[0]
     return "root"
 
