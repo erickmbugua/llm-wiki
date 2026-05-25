@@ -7,8 +7,8 @@ from typing import Any
 
 import litellm
 
-from .config import resolve_model
-from .database import get_db, reconcile, search
+from .config import resolve_embedding_config, resolve_model
+from .database import compute_embedding, get_db, hybrid_search, reconcile
 
 log = logging.getLogger(__name__)
 
@@ -67,19 +67,29 @@ def query_wiki(
 def _build_context(vault_path: Path, wiki_root: Path, question: str) -> tuple[str, list[str]]:
     """Search the wiki for pages relevant to the question and format them as an LLM context block.
 
+    Uses hybrid retrieval (FTS5 + vector search with RRF) when an embedding model is
+    configured. Falls back to lexical-only search if the embedding call fails.
+
     Args:
         vault_path: Root directory of the vault (used to open the DB).
         wiki_root: Root of the wiki directory (used to read page files).
-        question: The user's question, used as the FTS5 search query.
+        question: The user's question, used as the search query.
 
     Returns:
         A tuple of (context_string, source_paths). ``context_string`` is a markdown-formatted
         block of page snippets separated by ``---``. ``source_paths`` lists each page's
         relative path. Returns a fallback message and empty list when no pages are found.
     """
+    emb_model, _ = resolve_embedding_config(vault_path)
+    query_embedding: list[float] | None = None
+    try:
+        query_embedding = compute_embedding(question, model=emb_model)
+    except Exception:
+        log.warning("Embedding failed for query; falling back to lexical-only search")
+
     conn = get_db(vault_path)
     try:
-        results = search(conn, question, limit=CONTEXT_PAGES)
+        results = hybrid_search(conn, question, query_embedding, limit=CONTEXT_PAGES)
     finally:
         conn.close()
 

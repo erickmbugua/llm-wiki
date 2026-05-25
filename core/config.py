@@ -20,6 +20,8 @@ class GlobalConfig:
     context_chars: int = 24_000
     chunk_size: int = 20_000
     chunk_overlap: int = 500
+    embedding_model: str = "ollama/nomic-embed-text"
+    embedding_dim: int = 768
 
     @classmethod
     def load(cls) -> GlobalConfig:
@@ -98,6 +100,8 @@ class VaultConfig:
     context_chars: int | None = None  # overrides global when set
     chunk_size: int | None = None  # overrides global when set
     chunk_overlap: int | None = None  # overrides global when set
+    embedding_model: str | None = None  # overrides global when set
+    embedding_dim: int | None = None  # overrides global when set
 
     @classmethod
     def load(cls, vault_path: Path) -> VaultConfig:
@@ -186,3 +190,27 @@ def resolve_chunk_config(vault_path: Path | None = None) -> tuple[int, int]:
         if vault_cfg.chunk_overlap is not None:
             chunk_overlap = vault_cfg.chunk_overlap
     return chunk_size, chunk_overlap
+
+
+def resolve_embedding_config(vault_path: Path | None = None) -> tuple[str, int]:
+    """Return the effective embedding model and dimension using the three-level priority chain.
+
+    Priority: vault-level override > global config > hardcoded defaults
+    (``"ollama/nomic-embed-text"``, ``768``).
+
+    Args:
+        vault_path: Root of the vault. When None, only the global config is checked.
+
+    Returns:
+        A tuple of (embedding_model, embedding_dim).
+    """
+    global_cfg = GlobalConfig.load()
+    embedding_model = global_cfg.embedding_model
+    embedding_dim = global_cfg.embedding_dim
+    if vault_path is not None:
+        vault_cfg = VaultConfig.load(vault_path)
+        if vault_cfg.embedding_model is not None:
+            embedding_model = vault_cfg.embedding_model
+        if vault_cfg.embedding_dim is not None:
+            embedding_dim = vault_cfg.embedding_dim
+    return embedding_model, embedding_dim

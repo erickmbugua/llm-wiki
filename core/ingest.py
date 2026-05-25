@@ -13,13 +13,21 @@ import litellm
 import requests
 from bs4 import BeautifulSoup
 
-from .config import resolve_chunk_config, resolve_context_chars, resolve_model
+from .config import (
+    resolve_chunk_config,
+    resolve_context_chars,
+    resolve_embedding_config,
+    resolve_model,
+)
 from .database import (
+    compute_embedding,
     get_db,
+    get_page,
     get_pending_queue,
+    hybrid_search,
     mark_queue_item,
     partial_reconcile,
-    search,
+    upsert_page,
 )
 
 log = logging.getLogger(__name__)
@@ -136,6 +144,7 @@ def ingest_source(
         try:
             written_paths = [wiki_root / fp for fp in written]
             partial_reconcile(conn, wiki_root, written_paths)
+            _store_embeddings(conn, wiki_root, written_paths, vault_path)
         finally:
             conn.close()
         _append_log(vault_path, display_name, written)
@@ -275,6 +284,48 @@ def _summarize_chunks(
         )
         summaries_text = summaries_text[: context_chars - len(note)] + note
     return summaries_text
+
+
+# ---------------------------------------------------------------------------
+# Embedding helpers
+# ---------------------------------------------------------------------------
+
+
+def _store_embeddings(
+    conn: object,
+    wiki_root: Path,
+    written_paths: list[Path],
+    vault_path: Path,
+) -> None:
+    """Compute and store embeddings for newly written wiki pages.
+
+    Silently skips individual pages whose embedding computation fails so that a
+    missing or slow embedding model never aborts an otherwise successful ingest.
+
+    Args:
+        conn: Open database connection.
+        wiki_root: Root of the wiki directory.
+        written_paths: Absolute paths to pages just written by this ingest.
+        vault_path: Root of the vault (used to resolve the embedding model).
+    """
+    import sqlite3 as _sqlite3
+
+    if not isinstance(conn, _sqlite3.Connection):
+        return
+
+    emb_model, _ = resolve_embedding_config(vault_path)
+    for page_path in written_paths:
+        if not page_path.exists():
+            continue
+        rel = str(page_path.relative_to(wiki_root))
+        try:
+            text_for_embed = page_path.read_text()[:8192]
+            embedding = compute_embedding(text_for_embed, model=emb_model)
+            page = get_page(conn, rel)
+            if page is not None:
+                upsert_page(conn, wiki_root, page_path, embedding=embedding)
+        except Exception as exc:
+            log.warning("Could not compute embedding for '%s': %s", rel, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -464,8 +515,9 @@ def _load_schema(vault_path: Path) -> str:
 def _fetch_related(vault_path: Path, wiki_root: Path, text: str) -> str:
     """Search the wiki for pages related to the source text and return their content snippets.
 
-    Uses the first 500 characters of the source text as a seed query, extracts words
-    longer than 4 characters, and returns up to ``RELATED_PAGES_LIMIT`` matching pages.
+    Uses the first 500 characters of the source text as a seed query. Performs hybrid
+    retrieval (FTS5 + vector search with RRF) when an embedding model is available;
+    falls back to lexical-only search on embedding failure.
 
     Args:
         vault_path: Root directory of the vault (used to open the DB).
@@ -476,14 +528,22 @@ def _fetch_related(vault_path: Path, wiki_root: Path, text: str) -> str:
         A formatted string of related page snippets (title, path, content preview),
         or an empty string when no matches are found.
     """
+    seed = re.sub(r"[^\w\s]", " ", text[:500])
+    words = [w for w in seed.split() if len(w) > 4][:10]
+    if not words:
+        return ""
+    fts_query = " OR ".join(words)
+
+    emb_model, _ = resolve_embedding_config(vault_path)
+    query_embedding: list[float] | None = None
+    try:
+        query_embedding = compute_embedding(text[:500], model=emb_model)
+    except Exception:
+        log.debug("Embedding unavailable for related-pages search; using lexical only")
+
     conn = get_db(vault_path)
     try:
-        # Use first 500 chars as a seed query; strip markdown/special chars
-        seed = re.sub(r"[^\w\s]", " ", text[:500])
-        words = [w for w in seed.split() if len(w) > 4][:10]
-        if not words:
-            return ""
-        results = search(conn, " OR ".join(words), limit=RELATED_PAGES_LIMIT)
+        results = hybrid_search(conn, fts_query, query_embedding, limit=RELATED_PAGES_LIMIT)
     finally:
         conn.close()
 

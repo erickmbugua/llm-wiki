@@ -119,3 +119,35 @@ class TestQueryWiki:
         ):
             result = query_wiki(populated_vault, "Q?")
         assert result["saved_to"] is None
+
+
+# ── _build_context — hybrid search wiring ─────────────────────────────────────
+
+
+_FAKE_VEC = [0.1] * 768
+
+
+class TestBuildContextHybridSearch:
+    def test_hybrid_search_called_with_embedding(self, populated_vault):
+        wiki = populated_vault / "wiki"
+        with (
+            patch("core.query.compute_embedding", return_value=_FAKE_VEC),
+            patch("core.query.hybrid_search", return_value=[]) as mock_search,
+        ):
+            _build_context(populated_vault, wiki, "attention")
+
+        mock_search.assert_called_once()
+        positional = mock_search.call_args[0]
+        assert positional[1] == "attention"
+        assert positional[2] == _FAKE_VEC
+
+    def test_falls_back_to_none_embedding_on_error(self, populated_vault):
+        wiki = populated_vault / "wiki"
+        with (
+            patch("core.query.compute_embedding", side_effect=RuntimeError("model down")),
+            patch("core.query.hybrid_search", return_value=[]) as mock_search,
+        ):
+            _build_context(populated_vault, wiki, "attention")
+
+        positional = mock_search.call_args[0]
+        assert positional[2] is None

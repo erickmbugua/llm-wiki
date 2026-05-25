@@ -281,6 +281,37 @@ def set_chunk_overlap(chars: int, vault: str | None):
         console.print(f"[green]✓[/green] Global chunk_overlap → [bold]{chars}[/bold]")
 
 
+@cli.command("set-embedding-model")
+@click.argument("model")
+@click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
+def set_embedding_model(model: str, vault: str | None):
+    """Set the embedding model for semantic search (e.g. ollama/nomic-embed-text).
+
+    The embedding model must be pulled separately from the ingest model.
+    For Ollama: ollama pull nomic-embed-text
+    """
+    from core.config import VaultConfig
+
+    config = GlobalConfig.load()
+    if vault:
+        try:
+            _, vpath = config.resolve_vault(vault)
+        except (ValueError, KeyError) as e:
+            console.print(f"[red]{e}[/red]")
+            raise SystemExit(1) from None
+        vcfg = VaultConfig.load(vpath)
+        vcfg.embedding_model = model
+        vcfg.save(vpath)
+        console.print(
+            f"[green]✓[/green] embedding_model for vault [bold]{vault}[/bold] → [bold]{model}[/bold]"
+        )
+    else:
+        config.embedding_model = model
+        config.save()
+        console.print(f"[green]✓[/green] Global embedding_model → [bold]{model}[/bold]")
+    _warn_if_unknown_model(model)
+
+
 # ---------------------------------------------------------------------------
 # LLM operations
 # ---------------------------------------------------------------------------

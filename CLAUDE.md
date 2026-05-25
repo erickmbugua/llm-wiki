@@ -119,7 +119,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (204 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (213 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
@@ -250,6 +250,37 @@ The executor registry (`_vault_executors` in `core/server.py`) is populated by `
 at startup via `register_vault_executor()`. When the server is started without `main_server.py`
 (e.g. direct uvicorn or tests), a one-shot `ThreadPoolExecutor` is created on the fly.
 
+### sqlite-vec extension loading
+`get_db` loads the `sqlite-vec` extension on every connection:
+```python
+conn.enable_load_extension(True)
+sqlite_vec.load(conn)
+conn.enable_load_extension(False)
+```
+This must happen **before** `_ensure_schema` because `CREATE VIRTUAL TABLE … USING vec0(…)` is a
+vec0 virtual table. Any connection that skips this step will fail with
+`"no such module: vec0"`. Tests use `get_db` so they pick it up automatically.
+
+### Embedding model setup
+`compute_embedding` calls `litellm.embedding`. The default model is `ollama/nomic-embed-text`.
+Pull it before ingest:
+```bash
+ollama pull nomic-embed-text
+```
+If the embedding call fails (model not running, dimension mismatch), `ingest_source` and
+`_build_context` both catch the exception and continue without embeddings — FTS5-only search
+acts as the graceful fallback. Override the embedding model per-vault with
+`llm-wiki set-embedding-model`. `resolve_embedding_config(vault_path) -> tuple[str, int]` uses
+the same three-level priority chain as `resolve_model`.
+
+### `compute_embedding` return type coercion
+`litellm.embedding()` returns an opaque type that mypy treats as `Any`. To satisfy the
+`list[float]` return type annotation, the result is coerced explicitly:
+```python
+return [float(v) for v in result]
+```
+This also guards against models that return numpy arrays or other sequences.
+
 ### Optional dependency type gaps (pypdf)
 Optional imports inside `try/except ImportError` suppress the module-not-found error but
 leave member access as `Unknown`. Suppress usage lines individually:
@@ -266,9 +297,9 @@ pages: list[str] = [p.extract_text() or "" for p in reader.pages]  # pyright: ig
 ```
 llm-wiki/
 ├── core/
-│   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars(), resolve_chunk_config()
-│   ├── database.py    # SQLite FTS5 engine, CRUD, reconcile, backlinks, queue
-│   ├── ingest.py      # Text extraction, chunking, LLM page generation, queue processing
+│   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars(), resolve_chunk_config(), resolve_embedding_config()
+│   ├── database.py    # SQLite FTS5 + vec0 engine, CRUD, reconcile, backlinks, queue, hybrid search, embeddings
+│   ├── ingest.py      # Text extraction, chunking, LLM page generation, embedding storage, queue processing
 │   ├── lint.py        # Structural checks + LLM contradiction review
 │   ├── mcp_server.py  # MCP stdio server (7 tools for Claude Code / Cursor)
 │   ├── query.py       # FTS5 context retrieval + LLM Q&A

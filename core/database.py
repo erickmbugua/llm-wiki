@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import frontmatter
+import litellm
+import sqlite_vec  # pyright: ignore[reportMissingModuleSource]
 import yaml
 
 from .config import VAULT_DB_FILE, VAULT_INTERNAL_DIR
@@ -32,6 +34,9 @@ def get_db(vault_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)  # pyright: ignore[reportAttributeAccessIssue]
+    conn.enable_load_extension(False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _ensure_schema(conn)
@@ -91,6 +96,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             error       TEXT
         );
 
+        CREATE VIRTUAL TABLE IF NOT EXISTS page_vectors USING vec0(
+            embedding float[768]
+        );
         CREATE TABLE IF NOT EXISTS ingest_jobs (
             id           TEXT PRIMARY KEY,
             vault        TEXT NOT NULL,
@@ -111,16 +119,23 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 # ---------------------------------------------------------------------------
 
 
-def upsert_page(conn: sqlite3.Connection, wiki_root: Path, md_path: Path) -> None:
+def upsert_page(
+    conn: sqlite3.Connection,
+    wiki_root: Path,
+    md_path: Path,
+    embedding: list[float] | None = None,
+) -> None:
     """Insert or update a page record from a markdown file on disk.
 
     Reads YAML frontmatter (title, tags) and derives the category from the file path.
     The first non-heading, non-table line is stored as a short summary.
+    When ``embedding`` is provided, upserts the vector into ``page_vectors``.
 
     Args:
         conn: Open database connection.
         wiki_root: Root of the wiki directory (used to derive the relative path).
         md_path: Absolute path to the ``.md`` file to index.
+        embedding: Optional dense embedding vector to store for semantic search.
     """
     try:
         post = frontmatter.load(str(md_path))
@@ -151,6 +166,13 @@ def upsert_page(conn: sqlite3.Connection, wiki_root: Path, md_path: Path) -> Non
     """,
         (rel_path, title, category, content, tags, mtime, summary),
     )
+    if embedding is not None:
+        row = conn.execute("SELECT id FROM pages WHERE file_path=?", (rel_path,)).fetchone()
+        if row is not None:
+            conn.execute(
+                "INSERT OR REPLACE INTO page_vectors(rowid, embedding) VALUES (?, ?)",
+                (row["id"], sqlite_vec.serialize_float32(embedding)),  # pyright: ignore[reportAttributeAccessIssue]
+            )
     conn.commit()
 
 
@@ -235,6 +257,117 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[dict[s
         (clean, limit),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Semantic search
+# ---------------------------------------------------------------------------
+
+
+def compute_embedding(text: str, model: str) -> list[float]:
+    """Compute a dense embedding vector for text using the given litellm model.
+
+    Args:
+        text: Text to embed. Truncated to 8192 chars to stay within model context limits.
+        model: litellm embedding model string (e.g. ``"ollama/nomic-embed-text"``).
+
+    Returns:
+        A list of floats representing the embedding vector.
+
+    Raises:
+        RuntimeError: The embedding model is unavailable or returns an unexpected shape.
+    """
+    try:
+        response = litellm.embedding(  # pyright: ignore[reportAttributeAccessIssue]
+            model=model, input=[text[:8192]]
+        )
+        result = response.data[0].embedding  # pyright: ignore[reportAttributeAccessIssue]
+        return [float(v) for v in result]
+    except Exception as exc:
+        raise RuntimeError(
+            f"Embedding failed for model '{model}': {exc}. "
+            "Ensure the embedding model is running and pulled."
+        ) from exc
+
+
+def vector_search(
+    conn: sqlite3.Connection,
+    query_embedding: list[float],
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """KNN search over page_vectors using cosine distance.
+
+    Args:
+        conn: Open database connection with sqlite-vec loaded.
+        query_embedding: Dense vector for the query.
+        limit: Maximum number of results.
+
+    Returns:
+        List of page dicts (file_path, title, category, summary, tags, backlinks, rank)
+        ordered by vector similarity, or an empty list if no embeddings exist yet.
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT p.file_path, p.title, p.category, p.summary, p.tags, p.backlinks,
+                   v.distance AS rank
+            FROM page_vectors v
+            JOIN pages p ON v.rowid = p.id
+            WHERE v.embedding MATCH ?
+              AND k = ?
+            ORDER BY v.distance
+            """,
+            (sqlite_vec.serialize_float32(query_embedding), limit),  # pyright: ignore[reportAttributeAccessIssue]
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def hybrid_search(
+    conn: sqlite3.Connection,
+    query: str,
+    query_embedding: list[float] | None,
+    limit: int = 10,
+    rrf_k: int = 60,
+) -> list[dict[str, Any]]:
+    """Merge FTS5 and vector search results with Reciprocal Rank Fusion (RRF).
+
+    Falls back to FTS5-only when query_embedding is None (e.g. embedding model not
+    configured or embedding call failed).
+
+    Args:
+        conn: Open database connection.
+        query: Raw text query for FTS5.
+        query_embedding: Dense vector for semantic search, or None for lexical-only.
+        limit: Final result count to return.
+        rrf_k: RRF smoothing constant (60 is the standard default).
+
+    Returns:
+        List of page dicts ordered by fused relevance score.
+    """
+    fts_results = search(conn, query, limit=limit)
+    if query_embedding is None:
+        return fts_results
+
+    vec_results = vector_search(conn, query_embedding, limit=limit)
+
+    # Assign RRF scores: score(doc) = sum(1 / (rrf_k + rank_i)) for each list it appears in
+    scores: dict[str, float] = {}
+    pages: dict[str, dict[str, Any]] = {}
+
+    for rank, r in enumerate(fts_results, start=1):
+        fp = r["file_path"]
+        scores[fp] = scores.get(fp, 0.0) + 1.0 / (rrf_k + rank)
+        pages[fp] = r
+
+    for rank, r in enumerate(vec_results, start=1):
+        fp = r["file_path"]
+        scores[fp] = scores.get(fp, 0.0) + 1.0 / (rrf_k + rank)
+        pages.setdefault(fp, r)
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [pages[fp] for fp, _ in ranked[:limit]]
 
 
 # ---------------------------------------------------------------------------

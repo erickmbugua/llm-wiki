@@ -2,6 +2,7 @@
 
 import json
 import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -9,12 +10,14 @@ from core.database import (
     _extract_summary,
     _infer_category,
     _rebuild_backlinks,
+    compute_embedding,
     create_job,
     delete_page,
     get_db,
     get_job,
     get_page,
     get_pending_queue,
+    hybrid_search,
     list_jobs,
     list_pages,
     mark_queue_item,
@@ -24,6 +27,7 @@ from core.database import (
     search,
     update_job_status,
     upsert_page,
+    vector_search,
 )
 
 # ── Schema / get_db ───────────────────────────────────────────────────────────
@@ -477,3 +481,98 @@ class TestIngestJobs:
         for i in range(5):
             create_job(db_conn, job_id=f"job-{i}", vault="V", source=f"src-{i}")
         assert len(list_jobs(db_conn, limit=3)) == 3
+
+
+# ── Semantic search (embeddings + vector KNN + hybrid RRF) ────────────────────
+
+_DIM = 768
+_ZERO_VEC = [0.0] * _DIM
+_ONE_VEC = [1.0] + [0.0] * (_DIM - 1)
+
+
+class TestSemanticSearch:
+    def test_compute_embedding_returns_list_of_floats(self):
+        fake_response = MagicMock()
+        fake_response.data = [MagicMock(embedding=[0.1] * _DIM)]
+        with patch("core.database.litellm.embedding", return_value=fake_response):
+            result = compute_embedding("hello world", model="ollama/nomic-embed-text")
+        assert isinstance(result, list)
+        assert len(result) == _DIM
+        assert all(isinstance(v, float) for v in result)
+
+    def test_compute_embedding_raises_runtime_error_on_failure(self):
+        with (
+            patch("core.database.litellm.embedding", side_effect=ConnectionError("model down")),
+            pytest.raises(RuntimeError, match="Embedding failed"),
+        ):
+            compute_embedding("hello", model="bad-model")
+
+    def test_upsert_page_stores_embedding(self, tmp_vault):
+        wiki = tmp_vault / "wiki"
+        page = wiki / "Concepts" / "Emb.md"
+        page.write_text("---\ntitle: Emb\ntags: []\n---\nEmbedding test page.\n")
+
+        conn = get_db(tmp_vault)
+        upsert_page(conn, wiki, page, embedding=_ONE_VEC)
+
+        row = conn.execute(
+            "SELECT v.rowid FROM page_vectors v JOIN pages p ON v.rowid = p.id WHERE p.file_path=?",
+            ("Concepts/Emb.md",),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+
+    def test_vector_search_returns_matching_page(self, tmp_vault):
+        wiki = tmp_vault / "wiki"
+        page = wiki / "Concepts" / "Vec.md"
+        page.write_text("---\ntitle: Vec\ntags: []\n---\nVector page.\n")
+
+        conn = get_db(tmp_vault)
+        upsert_page(conn, wiki, page, embedding=_ONE_VEC)
+
+        results = vector_search(conn, _ONE_VEC, limit=5)
+        conn.close()
+
+        assert len(results) > 0
+        assert results[0]["file_path"] == "Concepts/Vec.md"
+
+    def test_vector_search_returns_empty_when_no_embeddings(self, tmp_vault):
+        wiki = tmp_vault / "wiki"
+        page = wiki / "Concepts" / "NoEmb.md"
+        page.write_text("---\ntitle: NoEmb\ntags: []\n---\nNo embedding.\n")
+
+        conn = get_db(tmp_vault)
+        upsert_page(conn, wiki, page)  # no embedding
+        results = vector_search(conn, _ONE_VEC, limit=5)
+        conn.close()
+
+        assert results == []
+
+    def test_hybrid_search_fuses_fts_and_vector_results(self, tmp_vault):
+        wiki = tmp_vault / "wiki"
+        page = wiki / "Concepts" / "Hybrid.md"
+        page.write_text("---\ntitle: Hybrid\ntags: []\n---\nquantum physics superposition.\n")
+
+        conn = get_db(tmp_vault)
+        upsert_page(conn, wiki, page, embedding=_ONE_VEC)
+
+        results = hybrid_search(conn, "quantum physics", _ONE_VEC, limit=5)
+        conn.close()
+
+        assert len(results) > 0
+        paths = [r["file_path"] for r in results]
+        assert "Concepts/Hybrid.md" in paths
+
+    def test_hybrid_search_falls_back_to_lexical_when_no_embedding(self, tmp_vault):
+        wiki = tmp_vault / "wiki"
+        page = wiki / "Concepts" / "LexOnly.md"
+        page.write_text("---\ntitle: LexOnly\ntags: []\n---\nneutral buoyancy experiment.\n")
+
+        conn = get_db(tmp_vault)
+        upsert_page(conn, wiki, page)
+
+        results = hybrid_search(conn, "neutral buoyancy", None, limit=5)
+        conn.close()
+
+        assert len(results) > 0
+        assert results[0]["file_path"] == "Concepts/LexOnly.md"

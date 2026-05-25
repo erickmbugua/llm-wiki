@@ -31,15 +31,27 @@ Manages two configuration scopes:
 - `model: str` — default LiteLLM model string
 - `server_port: int` — dashboard port (default 8000)
 - `context_chars: int` — default source text limit sent to LLM (default 24,000)
+- `chunk_size: int` — max chars per chunk for map-reduce ingest (default 20,000)
+- `chunk_overlap: int` — overlap chars between adjacent chunks (default 500)
+- `embedding_model: str` — LiteLLM embedding model string (default `"ollama/nomic-embed-text"`)
+- `embedding_dim: int` — vector dimension matching the embedding model (default 768)
 
 **`VaultConfig`** — persisted at `<vault>/.llm-wiki/config.json`
 - `name: str` — display name
 - `model: str | None` — overrides global when set
 - `context_chars: int | None` — overrides global when set
+- `chunk_size: int | None` — overrides global when set
+- `chunk_overlap: int | None` — overrides global when set
+- `embedding_model: str | None` — overrides global when set
+- `embedding_dim: int | None` — overrides global when set
 
 **`resolve_model(vault_path)`** — returns the effective model for a vault (vault override → global → hardcoded default). Call this in any module that needs to invoke the LLM.
 
 **`resolve_context_chars(vault_path)`** — returns the effective character limit for source text (vault override → global → 24,000). Use this instead of any hardcoded constant.
+
+**`resolve_chunk_config(vault_path)`** — returns `(chunk_size, chunk_overlap)` using the same priority chain.
+
+**`resolve_embedding_config(vault_path)`** — returns `(embedding_model, embedding_dim)` using the same priority chain.
 
 Constants:
 - `VAULT_INTERNAL_DIR = ".llm-wiki"` — internal dir name inside each vault
@@ -77,7 +89,8 @@ pages (
     id, file_path UNIQUE, title, category, content,
     tags (JSON array), mtime, summary, backlinks (JSON array)
 )
-pages_fts  -- FTS5 virtual table, content=pages (triggers keep in sync)
+pages_fts     -- FTS5 virtual table, content=pages (triggers keep in sync)
+page_vectors  -- vec0 virtual table; embedding float[768]; rowid = pages.id
 ingest_queue (id, file_path, status, added_at, processed_at, error)
 ingest_jobs (id TEXT PK, vault, source, status, created_at, started_at, finished_at,
              pages_written JSON array, error)
@@ -85,15 +98,20 @@ ingest_jobs (id TEXT PK, vault, source, status, created_at, started_at, finished
 
 `pages_fts` uses **porter ASCII tokenizer** and is kept in sync with `pages` via three triggers (INSERT, UPDATE, DELETE). Do not manually insert into `pages_fts`.
 
+`page_vectors` is a `vec0` virtual table provided by the **sqlite-vec** extension. `get_db` loads the extension on every connection (`sqlite_vec.load(conn)`) before calling `_ensure_schema`. The rowid of `page_vectors` is the same as `pages.id`, joined as `JOIN pages p ON v.rowid = p.id`.
+
 ### Key functions
 
 | Function | What it does |
 |---|---|
-| `get_db(vault_path)` | Opens (and creates if needed) the SQLite connection with WAL mode enabled |
-| `upsert_page(conn, wiki_root, md_path)` | Parses YAML frontmatter, infers category from path, extracts summary, upserts into `pages` |
+| `get_db(vault_path)` | Opens (and creates if needed) the SQLite connection with WAL mode enabled; loads sqlite-vec |
+| `upsert_page(conn, wiki_root, md_path, embedding)` | Parses YAML frontmatter, infers category, extracts summary, upserts `pages`; stores embedding in `page_vectors` when provided |
 | `reconcile(conn, wiki_root)` | Diffs filesystem vs DB by comparing `mtime`; adds/updates/removes pages; calls `_rebuild_backlinks` |
 | `_rebuild_backlinks(conn)` | Full re-scan of `[[wikilink]]` patterns across all pages; updates `backlinks` column; logs a WARNING on title stem collisions (alphabetically first path wins) |
 | `search(conn, query, limit)` | FTS5 `MATCH` with BM25 ranking (`ORDER BY rank`) |
+| `compute_embedding(text, model)` | Calls `litellm.embedding` and returns a `list[float]`; raises `RuntimeError` if the model is unavailable |
+| `vector_search(conn, query_embedding, limit)` | KNN search over `page_vectors` using vec0 cosine distance; returns empty list when no embeddings exist |
+| `hybrid_search(conn, query, query_embedding, limit, rrf_k)` | Merges FTS5 + vector results with Reciprocal Rank Fusion; falls back to FTS5-only when `query_embedding` is `None` |
 | `queue_raw_file(conn, file_path)` | Adds a file to `ingest_queue` with status `pending`; re-queues failed items by resetting their status |
 | `get_pending_queue(conn)` | Returns all pending queue items in insertion order |
 | `mark_queue_item(conn, path, status, error)` | Updates queue item status to `processing`, `done`, or `failed` |
