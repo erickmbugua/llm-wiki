@@ -132,9 +132,15 @@ async def api_list_pages(vault_name: str, category: str | None = Query(None)):
 
 @app.get("/api/vaults/{vault_name}/pages/content")
 async def api_get_page(vault_name: str, file_path: str = Query(...)):
-    """Return the raw markdown content of a single wiki page by its relative file path."""
+    """Return the raw markdown content of a single wiki page by its relative file path.
+
+    Raises HTTP 400 if the resolved path escapes the wiki root (path traversal guard).
+    """
     _, vpath = _get_vault(vault_name)
-    page_path = vpath / "wiki" / file_path
+    wiki_root = (vpath / "wiki").resolve()
+    page_path = (wiki_root / file_path).resolve()
+    if not page_path.is_relative_to(wiki_root):
+        raise HTTPException(status_code=400, detail="Invalid file path")
     if not page_path.exists():
         raise HTTPException(status_code=404, detail=f"Page not found: {file_path}")
     return {"file_path": file_path, "content": page_path.read_text()}

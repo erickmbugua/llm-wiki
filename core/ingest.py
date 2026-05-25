@@ -407,11 +407,32 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _safe_wiki_path(wiki_root: Path, rel_path: str) -> Path | None:
+    """Resolve a LLM-supplied relative path and confirm it stays inside wiki_root.
+
+    Args:
+        wiki_root: Absolute root of the wiki directory.
+        rel_path: Relative path string returned by the LLM (e.g. ``"Concepts/Foo.md"``).
+
+    Returns:
+        The resolved absolute path if it is contained within wiki_root, otherwise ``None``.
+        A ``None`` return means the path is unsafe and the caller should skip the write.
+    """
+    resolved = (wiki_root / rel_path).resolve()
+    if not resolved.is_relative_to(wiki_root.resolve()):
+        log.warning("LLM returned unsafe path '%s'; skipping write", rel_path)
+        return None
+    return resolved
+
+
 def _write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
     """Write the source page and all page updates from the parsed LLM result to disk.
 
     For ``"create"`` actions on an already-existing file the new content is appended
     after a markdown divider rather than overwriting.
+
+    All LLM-supplied file paths are validated against wiki_root before writing;
+    paths that escape the wiki directory are logged and silently skipped.
 
     Args:
         wiki_root: Root of the wiki directory.
@@ -424,10 +445,11 @@ def _write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
 
     source_page = result.get("source_page", {})
     if source_page.get("file_path") and source_page.get("content"):
-        p = wiki_root / source_page["file_path"]
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(source_page["content"])
-        written.append(source_page["file_path"])
+        p = _safe_wiki_path(wiki_root, source_page["file_path"])
+        if p is not None:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(source_page["content"])
+            written.append(source_page["file_path"])
 
     for update in result.get("page_updates", []):
         fp = update.get("file_path", "")
@@ -435,7 +457,9 @@ def _write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
         action = update.get("action", "create")
         if not fp or not content:
             continue
-        p = wiki_root / fp
+        p = _safe_wiki_path(wiki_root, fp)
+        if p is None:
+            continue
         p.parent.mkdir(parents=True, exist_ok=True)
         if action == "create" and p.exists():
             # merge: append new content after a divider

@@ -100,6 +100,12 @@ class TestApiPageContent:
         r = client.get(f"/api/vaults/{vault_name}/pages/content?file_path=Concepts/Missing.md")
         assert r.status_code == 404
 
+    def test_path_traversal_rejected(self, client, vault_name):
+        r = client.get(
+            f"/api/vaults/{vault_name}/pages/content?file_path=../../.llm-wiki/config.json"
+        )
+        assert r.status_code == 400
+
 
 # ── /api/vaults/{name}/search ────────────────────────────────────────────────
 

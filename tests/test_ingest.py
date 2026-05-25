@@ -175,6 +175,36 @@ class TestWritePages:
         _write_pages(wiki, result)
         assert (wiki / "Sources" / "Deep" / "Article.md").exists()
 
+    def test_unsafe_source_page_path_is_skipped(self, tmp_vault):
+        wiki = tmp_vault / "wiki"
+        result = {
+            "source_page": {
+                "file_path": "../../evil.md",
+                "content": "malicious content",
+            },
+            "page_updates": [],
+        }
+        written = _write_pages(wiki, result)
+        assert written == []
+        assert not (tmp_vault / "evil.md").exists()
+
+    def test_unsafe_page_update_path_is_skipped(self, tmp_vault):
+        wiki = tmp_vault / "wiki"
+        result = {
+            "source_page": {"file_path": "Sources/Safe.md", "content": "# Safe"},
+            "page_updates": [
+                {
+                    "file_path": "../../.llm-wiki/config.json",
+                    "action": "create",
+                    "content": "{}",
+                }
+            ],
+        }
+        written = _write_pages(wiki, result)
+        assert "Sources/Safe.md" in written
+        assert "../../.llm-wiki/config.json" not in written
+        assert (tmp_vault / ".llm-wiki" / "config.json").read_text() != "{}"
+
 
 # ── _build_ingest_prompt ──────────────────────────────────────────────────────
 
