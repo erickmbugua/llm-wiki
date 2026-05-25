@@ -113,7 +113,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (145 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (183 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
@@ -239,7 +239,7 @@ pages: list[str] = [p.extract_text() or "" for p in reader.pages]  # pyright: ig
 ```
 llm-wiki/
 ├── core/
-│   ├── config.py      # GlobalConfig, VaultConfig, resolve_model()
+│   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars()
 │   ├── database.py    # SQLite FTS5 engine, CRUD, reconcile, backlinks, queue
 │   ├── ingest.py      # Text extraction, LLM page generation, queue processing
 │   ├── lint.py        # Structural checks + LLM contradiction review
@@ -274,5 +274,5 @@ llm-wiki/
 │   └── schema.md      # Vault purpose and ingestion conventions
 └── .llm-wiki/
     ├── wiki.db        # SQLite database (gitignored)
-    └── config.json    # Per-vault name + model override
+    └── config.json    # Per-vault name, model, and context_chars overrides
 ```
