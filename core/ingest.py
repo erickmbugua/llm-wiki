@@ -380,6 +380,8 @@ def _build_ingest_prompt(
         Rules:
         - source_page goes in Sources/; write a clear summary with [[wikilinks]] to concepts
         - Create or update pages in Concepts/ and Entities/ as appropriate
+        - "action": "create" — write this page (replaces existing content if the page already exists)
+        - "action": "update" — alias for create; always provide the complete updated page content
         - YAML frontmatter must include title and tags fields
         - Always quote YAML string values that contain colons: title: "Foo: Bar" not title: Foo: Bar
         - Use Obsidian [[Page Name]] syntax for all internal links
@@ -439,8 +441,9 @@ def _safe_wiki_path(wiki_root: Path, rel_path: str) -> Path | None:
 def _write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
     """Write the source page and all page updates from the parsed LLM result to disk.
 
-    For ``"create"`` actions on an already-existing file the new content is appended
-    after a markdown divider rather than overwriting.
+    Both ``"create"`` and ``"update"`` actions always write the full LLM-produced content,
+    replacing any existing file. The LLM receives current page content via the related-pages
+    context, so it already produces a complete updated page; appending would double content.
 
     All LLM-supplied file paths are validated against wiki_root before writing;
     paths that escape the wiki directory are logged and silently skipped.
@@ -465,19 +468,13 @@ def _write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
     for update in result.get("page_updates", []):
         fp = update.get("file_path", "")
         content = update.get("content", "")
-        action = update.get("action", "create")
         if not fp or not content:
             continue
         p = _safe_wiki_path(wiki_root, fp)
         if p is None:
             continue
         p.parent.mkdir(parents=True, exist_ok=True)
-        if action == "create" and p.exists():
-            # merge: append new content after a divider
-            existing = p.read_text()
-            p.write_text(existing + f"\n\n---\n\n{content}")
-        else:
-            p.write_text(content)
+        p.write_text(content)
         written.append(fp)
 
     return written

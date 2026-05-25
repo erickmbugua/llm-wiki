@@ -126,7 +126,7 @@ class TestWritePages:
         assert "Concepts/NewConcept.md" in written
         assert (wiki / "Concepts" / "NewConcept.md").exists()
 
-    def test_merges_existing_page_on_update_action(self, tmp_vault):
+    def test_create_on_existing_file_replaces_content(self, tmp_vault):
         wiki = tmp_vault / "wiki"
         existing = wiki / "Concepts" / "Existing.md"
         existing.write_text("# Original content")
@@ -136,14 +136,14 @@ class TestWritePages:
                 {
                     "file_path": "Concepts/Existing.md",
                     "action": "create",
-                    "content": "# New section",
+                    "content": "# Fully updated page",
                 },
             ],
         }
         _write_pages(wiki, result)
-        merged = existing.read_text()
-        assert "# Original content" in merged
-        assert "# New section" in merged
+        content = existing.read_text()
+        assert content == "# Fully updated page"
+        assert "# Original content" not in content
 
     def test_overwrites_existing_page_on_update_action(self, tmp_vault):
         wiki = tmp_vault / "wiki"
