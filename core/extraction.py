@@ -18,6 +18,8 @@ from bs4 import BeautifulSoup
 
 log = logging.getLogger(__name__)
 
+__all__ = ["SOURCE_CHAR_LIMIT", "_extract_text"]
+
 SOURCE_CHAR_LIMIT = 24_000
 
 _BINARY_SUFFIXES = frozenset(

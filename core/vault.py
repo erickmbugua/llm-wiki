@@ -8,6 +8,8 @@ from .config import VAULT_INTERNAL_DIR, VaultConfig
 from .constants import WIKI_CATEGORIES
 from .db import db_connection, list_pages
 
+__all__ = ["init_vault", "vault_stats", "rebuild_index"]
+
 
 def init_vault(vault_path: Path, name: str) -> None:
     """Create the full llm-wiki directory skeleton inside an (optionally new) vault directory.

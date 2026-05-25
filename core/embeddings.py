@@ -4,6 +4,8 @@ import logging
 
 import litellm
 
+__all__ = ["compute_embedding"]
+
 log = logging.getLogger(__name__)
 
 

@@ -29,6 +29,8 @@ from .lint import lint_vault
 from .query import query_wiki
 from .vault import rebuild_index, vault_stats
 
+__all__ = ["app", "register_vault_executor"]
+
 log = logging.getLogger(__name__)
 
 HERE = Path(__file__).parent.parent

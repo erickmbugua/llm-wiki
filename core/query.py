@@ -12,6 +12,8 @@ from .db import db_connection, hybrid_search, partial_reconcile
 from .embeddings import compute_embedding
 from .prompts import _build_query_prompt
 
+__all__ = ["query_wiki"]
+
 log = logging.getLogger(__name__)
 
 CONTEXT_PAGES = 6

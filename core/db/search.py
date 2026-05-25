@@ -7,6 +7,8 @@ from typing import Any
 
 import sqlite_vec  # pyright: ignore[reportMissingModuleSource]
 
+__all__ = ["search", "vector_search", "hybrid_search"]
+
 log = logging.getLogger(__name__)
 
 

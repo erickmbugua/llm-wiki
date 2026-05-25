@@ -10,6 +10,17 @@ VAULT_INTERNAL_DIR = ".llm-wiki"
 VAULT_CONFIG_FILE = "config.json"
 VAULT_DB_FILE = "wiki.db"
 
+__all__ = [
+    "GlobalConfig",
+    "VaultConfig",
+    "VAULT_INTERNAL_DIR",
+    "VAULT_DB_FILE",
+    "resolve_model",
+    "resolve_context_chars",
+    "resolve_chunk_config",
+    "resolve_embedding_config",
+]
+
 # Process-level config caches — eliminated repeated disk reads during a single operation.
 # Cleared by save() and by _clear_*_cache() helpers used in tests and server reset.
 _global_cfg_cache: GlobalConfig | None = None

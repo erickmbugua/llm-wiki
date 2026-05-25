@@ -10,6 +10,8 @@ import sqlite_vec  # pyright: ignore[reportMissingModuleSource]
 
 from ..config import VAULT_DB_FILE, VAULT_INTERNAL_DIR
 
+__all__ = ["get_db", "db_connection"]
+
 log = logging.getLogger(__name__)
 
 

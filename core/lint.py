@@ -15,6 +15,8 @@ from .constants import WIKI_CATEGORIES
 from .db import db_connection, list_pages, reconcile
 from .prompts import _build_lint_prompt
 
+__all__ = ["lint_vault"]
+
 log = logging.getLogger(__name__)
 
 CONTRADICTION_SAMPLE = 8  # pages sent to LLM for contradiction check

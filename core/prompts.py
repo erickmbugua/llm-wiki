@@ -16,6 +16,14 @@ import re
 import textwrap
 from typing import Any
 
+__all__ = [
+    "_build_ingest_prompt",
+    "_build_ingest_prompt_strict",
+    "_parse_llm_json",
+    "_build_query_prompt",
+    "_build_lint_prompt",
+]
+
 log = logging.getLogger(__name__)
 
 

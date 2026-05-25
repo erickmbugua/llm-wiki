@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+__all__ = ["WIKI_CATEGORIES"]
+
 # Canonical set of top-level wiki category directory names.
 # Import this wherever a membership check or directory iteration is needed so
 # that adding a new category (e.g. "Projects") requires only one change here.

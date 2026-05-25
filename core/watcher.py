@@ -15,6 +15,8 @@ from watchdog.observers import Observer
 
 from .db import db_connection, queue_raw_file
 
+__all__ = ["VaultWatcher", "IGNORED_SUFFIXES"]
+
 log = logging.getLogger(__name__)
 
 IGNORED_SUFFIXES = frozenset({".db", ".tmp", ".part", ".crdownload"})
