@@ -377,3 +377,76 @@ class TestCheckOllama:
             _check_ollama("ollama/qwen2.5-coder:7b")
             _check_ollama("ollama/llama3:8b")
         assert mock_get.call_count == 2
+
+
+# ── ingest_queued ─────────────────────────────────────────────────────────────
+
+
+class TestIngestQueued:
+    def test_success_status_transitions(self, tmp_vault):
+        """Queue item transitions pending → processing → done on success."""
+        from core.database import get_db, get_pending_queue, queue_raw_file
+        from core.ingest import ingest_queued
+
+        conn = get_db(tmp_vault)
+        queue_raw_file(conn, "/fake/file.txt")
+        conn.commit()
+        conn.close()
+
+        success_result = {
+            "source_page": {"file_path": "Sources/Fake.md", "content": "# Fake"},
+            "page_updates": [],
+            "pages_written": ["Sources/Fake.md"],
+        }
+        with patch("core.ingest.ingest_source", return_value=success_result):
+            results = ingest_queued(tmp_vault, "TestVault")
+
+        assert len(results) == 1
+        assert results[0]["status"] == "done"
+        assert results[0]["file"] == "/fake/file.txt"
+
+        conn = get_db(tmp_vault)
+        remaining = get_pending_queue(conn)
+        conn.close()
+        assert remaining == []
+
+    def test_failure_status_transitions(self, tmp_vault):
+        """Queue item transitions pending → processing → failed on exception."""
+        from core.database import get_db, queue_raw_file
+        from core.ingest import ingest_queued
+
+        conn = get_db(tmp_vault)
+        queue_raw_file(conn, "/fake/broken.txt")
+        conn.commit()
+        conn.close()
+
+        with patch("core.ingest.ingest_source", side_effect=ValueError("boom")):
+            results = ingest_queued(tmp_vault, "TestVault")
+
+        assert len(results) == 1
+        assert results[0]["status"] == "failed"
+        assert "boom" in results[0]["error"]
+
+    def test_single_db_connection_used(self, tmp_vault):
+        """ingest_queued opens exactly one DB connection for the entire queue."""
+        from core.database import get_db, queue_raw_file
+        from core.ingest import ingest_queued
+
+        conn = get_db(tmp_vault)
+        queue_raw_file(conn, "/fake/a.txt")
+        queue_raw_file(conn, "/fake/b.txt")
+        conn.commit()
+        conn.close()
+
+        success_result = {
+            "source_page": {"file_path": "Sources/X.md", "content": "# X"},
+            "page_updates": [],
+            "pages_written": ["Sources/X.md"],
+        }
+        with (
+            patch("core.ingest.ingest_source", return_value=success_result),
+            patch("core.ingest.get_db", wraps=get_db) as mock_get_db,
+        ):
+            ingest_queued(tmp_vault, "TestVault")
+
+        mock_get_db.assert_called_once()

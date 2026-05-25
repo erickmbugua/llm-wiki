@@ -98,6 +98,10 @@ def ingest_source(
 def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
     """Process every pending item in the ingest queue, updating queue status as it goes.
 
+    Opens a single DB connection for the entire loop — status updates (pending →
+    processing → done/failed) all reuse it. ``ingest_source`` still manages its own
+    internal connection for the reconcile step.
+
     Each item is marked ``"processing"`` before the ingest attempt, then ``"done"``
     or ``"failed"`` afterwards. Failures are logged but do not abort remaining items.
 
@@ -112,33 +116,20 @@ def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
     conn = get_db(vault_path)
     try:
         pending = get_pending_queue(conn)
+        results = []
+        for item in pending:
+            fp = item["file_path"]
+            mark_queue_item(conn, fp, "processing")
+            try:
+                r = ingest_source(vault_path, fp, vault_name)
+                mark_queue_item(conn, fp, "done")
+                results.append({"file": fp, "status": "done", **r})
+            except Exception as e:
+                mark_queue_item(conn, fp, "failed", str(e))
+                log.error("Failed to ingest %s: %s", fp, e)
+                results.append({"file": fp, "status": "failed", "error": str(e)})
     finally:
         conn.close()
-
-    results = []
-    for item in pending:
-        fp = item["file_path"]
-        conn = get_db(vault_path)
-        try:
-            mark_queue_item(conn, fp, "processing")
-        finally:
-            conn.close()
-        try:
-            r = ingest_source(vault_path, fp, vault_name)
-            conn = get_db(vault_path)
-            try:
-                mark_queue_item(conn, fp, "done")
-            finally:
-                conn.close()
-            results.append({"file": fp, "status": "done", **r})
-        except Exception as e:
-            conn = get_db(vault_path)
-            try:
-                mark_queue_item(conn, fp, "failed", str(e))
-            finally:
-                conn.close()
-            log.error("Failed to ingest %s: %s", fp, e)
-            results.append({"file": fp, "status": "failed", "error": str(e)})
     return results
 
 
