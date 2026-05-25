@@ -212,6 +212,17 @@ anyio's thread pool, keeping the event loop free while `litellm.completion` bloc
 on a local 7B model). Changing them back to `async def` would freeze the entire server
 during every LLM call. All other endpoints that only do fast I/O stay `async def`.
 
+### `context_chars` config — model-tier sizing
+`context_chars` controls how many characters of source text are fed to the LLM per ingest.
+The default is `24_000` (suitable for 7B models). Override per-vault with `llm-wiki set-context`:
+```
+3B-4B models  : 6_000
+7B models     : 24_000  (default)
+70B+ or cloud : 48_000
+```
+`resolve_context_chars(vault_path)` mirrors `resolve_model` with the same priority chain:
+vault-level `VaultConfig.context_chars` > global `GlobalConfig.context_chars` > 24_000.
+
 ### Optional dependency type gaps (pypdf)
 Optional imports inside `try/except ImportError` suppress the module-not-found error but
 leave member access as `Unknown`. Suppress usage lines individually:

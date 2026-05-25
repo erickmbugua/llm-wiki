@@ -13,7 +13,7 @@ import litellm
 import requests
 from bs4 import BeautifulSoup
 
-from .config import resolve_model
+from .config import resolve_context_chars, resolve_model
 from .database import (
     get_db,
     get_pending_queue,
@@ -84,7 +84,8 @@ def ingest_source(
     Raises:
         ValueError: Text extraction returned empty content.
     """
-    text, display_name = _extract_text(source)
+    char_limit = resolve_context_chars(vault_path)
+    text, display_name = _extract_text(source, char_limit=char_limit)
     if not text:
         raise ValueError(f"Could not extract text from: {source}")
 
@@ -211,7 +212,7 @@ def _check_ollama(model: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _extract_text(source: str) -> tuple[str, str]:
+def _extract_text(source: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
     """Dispatch text extraction to the appropriate handler based on the source string.
 
     Supported formats: .txt, .md, .pdf, .docx, and HTTP/HTTPS URLs.
@@ -221,16 +222,17 @@ def _extract_text(source: str) -> tuple[str, str]:
 
     Args:
         source: A file path or HTTP/HTTPS URL.
+        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
 
     Returns:
-        A tuple of (extracted_text, display_name). Text is capped at ``SOURCE_CHAR_LIMIT``
+        A tuple of (extracted_text, display_name). Text is capped at ``char_limit``
         characters. Returns ``("", source)`` when extraction is not possible.
 
     Raises:
         ValueError: The file extension is a known unsupported binary format.
     """
     if source.startswith("http://") or source.startswith("https://"):
-        return _fetch_url(source)
+        return _fetch_url(source, char_limit=char_limit)
 
     p = Path(source)
     if not p.exists():
@@ -238,11 +240,11 @@ def _extract_text(source: str) -> tuple[str, str]:
 
     suffix = p.suffix.lower()
     if suffix in (".txt", ".md"):
-        return p.read_text(errors="replace")[:SOURCE_CHAR_LIMIT], p.name
+        return p.read_text(errors="replace")[:char_limit], p.name
     if suffix == ".pdf":
-        return _extract_pdf(p), p.name
+        return _extract_pdf(p, char_limit=char_limit), p.name
     if suffix == ".docx":
-        return _extract_docx(p), p.name
+        return _extract_docx(p, char_limit=char_limit), p.name
     if suffix in _BINARY_SUFFIXES:
         raise ValueError(
             f"Unsupported file type '{suffix}'. "
@@ -250,19 +252,20 @@ def _extract_text(source: str) -> tuple[str, str]:
         )
     # fallback: try reading as text (handles .rst, .yaml, .json, etc.)
     try:
-        return p.read_text(errors="replace")[:SOURCE_CHAR_LIMIT], p.name
+        return p.read_text(errors="replace")[:char_limit], p.name
     except Exception:
         return "", p.name
 
 
-def _fetch_url(url: str) -> tuple[str, str]:
+def _fetch_url(url: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
     """Fetch a URL, strip boilerplate HTML tags, and return plain text with the page title.
 
     Args:
         url: HTTP or HTTPS URL to fetch.
+        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
 
     Returns:
-        A tuple of (plain_text, page_title). Text is capped at ``SOURCE_CHAR_LIMIT`` characters.
+        A tuple of (plain_text, page_title). Text is capped at ``char_limit`` characters.
 
     Raises:
         requests.HTTPError: The server returned a non-2xx status code.
@@ -274,17 +277,18 @@ def _fetch_url(url: str) -> tuple[str, str]:
         tag.decompose()
     title = soup.title.string.strip() if soup.title and soup.title.string else url
     text = soup.get_text(separator="\n", strip=True)
-    return text[:SOURCE_CHAR_LIMIT], title
+    return text[:char_limit], title
 
 
-def _extract_pdf(path: Path) -> str:
+def _extract_pdf(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
     """Extract text from a PDF file using pypdf.
 
     Args:
         path: Path to the PDF file.
+        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
 
     Returns:
-        Concatenated page text capped at ``SOURCE_CHAR_LIMIT`` characters,
+        Concatenated page text capped at ``char_limit`` characters,
         or an empty string if pypdf is not installed.
     """
     try:
@@ -294,20 +298,21 @@ def _extract_pdf(path: Path) -> str:
         pages: list[str] = [  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
             p.extract_text() or "" for p in reader.pages
         ]
-        return "\n".join(pages)[:SOURCE_CHAR_LIMIT]
+        return "\n".join(pages)[:char_limit]
     except ImportError:
         log.warning("pypdf not installed; install it for PDF support: pip install pypdf")
         return ""
 
 
-def _extract_docx(path: Path) -> str:
+def _extract_docx(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
     """Extract plain text from a .docx file using python-docx.
 
     Args:
         path: Path to the .docx file.
+        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
 
     Returns:
-        Concatenated paragraph text capped at ``SOURCE_CHAR_LIMIT`` characters,
+        Concatenated paragraph text capped at ``char_limit`` characters,
         or an empty string if python-docx is not installed.
     """
     try:
@@ -317,7 +322,7 @@ def _extract_docx(path: Path) -> str:
         text = "\n".join(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
             p.text for p in doc.paragraphs if p.text.strip()
         )
-        return text[:SOURCE_CHAR_LIMIT]
+        return text[:char_limit]
     except ImportError:
         log.warning(
             "python-docx not installed; install it for .docx support: pip install python-docx"

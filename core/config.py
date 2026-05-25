@@ -17,6 +17,7 @@ class GlobalConfig:
     default_vault: str | None = None
     model: str = "ollama/qwen2.5-coder:7b"
     server_port: int = 8000
+    context_chars: int = 24_000
 
     @classmethod
     def load(cls) -> GlobalConfig:
@@ -92,6 +93,7 @@ class GlobalConfig:
 class VaultConfig:
     name: str = ""
     model: str | None = None  # overrides global when set
+    context_chars: int | None = None  # overrides global when set
 
     @classmethod
     def load(cls, vault_path: Path) -> VaultConfig:
@@ -137,3 +139,22 @@ def resolve_model(vault_path: Path | None = None) -> str:
         if vault_cfg.model:
             return vault_cfg.model
     return global_cfg.model
+
+
+def resolve_context_chars(vault_path: Path | None = None) -> int:
+    """Return the effective source char limit using the same priority chain as resolve_model.
+
+    Priority: vault-level override > global config > hardcoded default (24_000).
+
+    Args:
+        vault_path: Root of the vault. When None, only the global config is checked.
+
+    Returns:
+        Maximum number of characters to feed to the LLM per source document.
+    """
+    global_cfg = GlobalConfig.load()
+    if vault_path is not None:
+        vault_cfg = VaultConfig.load(vault_path)
+        if vault_cfg.context_chars is not None:
+            return vault_cfg.context_chars
+    return global_cfg.context_chars

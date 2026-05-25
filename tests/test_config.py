@@ -1,10 +1,10 @@
-"""Tests for core/config.py — GlobalConfig, VaultConfig, resolve_model."""
+"""Tests for core/config.py — GlobalConfig, VaultConfig, resolve_model, resolve_context_chars."""
 
 import json
 
 import pytest
 
-from core.config import GlobalConfig, VaultConfig, resolve_model
+from core.config import GlobalConfig, VaultConfig, resolve_context_chars, resolve_model
 
 # ── GlobalConfig ──────────────────────────────────────────────────────────────
 
@@ -203,3 +203,31 @@ class TestReconcileVaults:
         assert cfg.default_vault is None
         saved = json.loads((patched_global_config / "config.json").read_text())
         assert "Stale" not in saved["vaults"]
+
+
+# ── resolve_context_chars ─────────────────────────────────────────────────────
+
+
+class TestResolveContextChars:
+    def test_resolve_context_chars_default(self, patched_global_config):
+        assert resolve_context_chars() == 24_000
+
+    def test_resolve_context_chars_falls_back_to_global(self, patched_global_config):
+        data = {
+            "vaults": {},
+            "default_vault": None,
+            "model": "ollama/qwen2.5-coder:7b",
+            "server_port": 8000,
+            "context_chars": 48_000,
+        }
+        (patched_global_config / "config.json").write_text(json.dumps(data))
+        assert resolve_context_chars() == 48_000
+
+    def test_resolve_context_chars_uses_vault_override(self, patched_global_config, tmp_path):
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".llm-wiki").mkdir()
+        (vault / ".llm-wiki" / "config.json").write_text(
+            json.dumps({"name": "v", "model": None, "context_chars": 8_000})
+        )
+        assert resolve_context_chars(vault) == 8_000

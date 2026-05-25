@@ -185,6 +185,38 @@ def set_model(model: str, vault: str | None):
     _warn_if_unknown_model(model)
 
 
+@cli.command("set-context")
+@click.argument("chars", type=int)
+@click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
+def set_context(chars: int, vault: str | None):
+    """Set the max source characters fed to the LLM per ingest.
+
+    Recommended values by model tier:
+      3B-4B models  : 6000
+      7B models (default): 24000
+      70B+ or cloud : 48000
+    """
+    from core.config import VaultConfig
+
+    config = GlobalConfig.load()
+    if vault:
+        try:
+            _, vpath = config.resolve_vault(vault)
+        except (ValueError, KeyError) as e:
+            console.print(f"[red]{e}[/red]")
+            raise SystemExit(1) from None
+        vcfg = VaultConfig.load(vpath)
+        vcfg.context_chars = chars
+        vcfg.save(vpath)
+        console.print(
+            f"[green]✓[/green] context_chars for vault [bold]{vault}[/bold] → [bold]{chars}[/bold]"
+        )
+    else:
+        config.context_chars = chars
+        config.save()
+        console.print(f"[green]✓[/green] Global context_chars → [bold]{chars}[/bold]")
+
+
 # ---------------------------------------------------------------------------
 # LLM operations
 # ---------------------------------------------------------------------------
