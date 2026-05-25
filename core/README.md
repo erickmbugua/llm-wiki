@@ -30,12 +30,16 @@ Manages two configuration scopes:
 - `default_vault: str | None` — used when `--vault` is omitted
 - `model: str` — default LiteLLM model string
 - `server_port: int` — dashboard port (default 8000)
+- `context_chars: int` — default source text limit sent to LLM (default 24,000)
 
 **`VaultConfig`** — persisted at `<vault>/.llm-wiki/config.json`
 - `name: str` — display name
 - `model: str | None` — overrides global when set
+- `context_chars: int | None` — overrides global when set
 
 **`resolve_model(vault_path)`** — returns the effective model for a vault (vault override → global → hardcoded default). Call this in any module that needs to invoke the LLM.
+
+**`resolve_context_chars(vault_path)`** — returns the effective character limit for source text (vault override → global → 24,000). Use this instead of any hardcoded constant.
 
 Constants:
 - `VAULT_INTERNAL_DIR = ".llm-wiki"` — internal dir name inside each vault
@@ -86,9 +90,9 @@ ingest_queue (id, file_path, status, added_at, processed_at, error)
 | `get_db(vault_path)` | Opens (and creates if needed) the SQLite connection with WAL mode enabled |
 | `upsert_page(conn, wiki_root, md_path)` | Parses YAML frontmatter, infers category from path, extracts summary, upserts into `pages` |
 | `reconcile(conn, wiki_root)` | Diffs filesystem vs DB by comparing `mtime`; adds/updates/removes pages; calls `_rebuild_backlinks` |
-| `_rebuild_backlinks(conn)` | Full re-scan of `[[wikilink]]` patterns across all pages; updates `backlinks` column |
+| `_rebuild_backlinks(conn)` | Full re-scan of `[[wikilink]]` patterns across all pages; updates `backlinks` column; logs a WARNING on title stem collisions (alphabetically first path wins) |
 | `search(conn, query, limit)` | FTS5 `MATCH` with BM25 ranking (`ORDER BY rank`) |
-| `queue_raw_file(conn, file_path)` | Adds a file to `ingest_queue` with status `pending` |
+| `queue_raw_file(conn, file_path)` | Adds a file to `ingest_queue` with status `pending`; re-queues failed items by resetting their status |
 | `get_pending_queue(conn)` | Returns all pending queue items in insertion order |
 | `mark_queue_item(conn, path, status, error)` | Updates queue item status to `processing`, `done`, or `failed` |
 
@@ -151,8 +155,10 @@ The LLM is asked to return:
 ### Text extraction
 - URLs → `requests.get` + `BeautifulSoup` (strips `script/style/nav/footer/aside`)
 - `.pdf` → `pypdf` (optional; warn if not installed)
+- `.docx` → `python-docx` (extracts paragraph text)
+- Binary files (`.zip`, `.exe`, etc.) → rejected with a clear `ValueError`
 - Everything else → `Path.read_text(errors='replace')`
-- All sources truncated to `SOURCE_CHAR_LIMIT = 24_000` chars before sending to LLM
+- All sources truncated to `resolve_context_chars(vault_path)` chars before sending to LLM (default 24,000; configurable per-vault with `llm-wiki set-context`)
 
 ### Extension points
 - Add new extractors in `_extract_text()` by matching on suffix or URL pattern
@@ -219,7 +225,7 @@ Dashboard HTML served from `app/templates/index.html` at `/`.
 | POST | `/api/vaults/{name}/lint` | Run lint pass |
 | GET | `/api/vaults/{name}/log` | Raw `log.md` content |
 
-All LLM endpoints (`ingest`, `query`, `lint`) are **synchronous** — they block until the LLM responds. For production use, wrap them with `asyncio.to_thread()` or use FastAPI's `BackgroundTasks` to avoid blocking the event loop.
+All LLM endpoints (`ingest`, `query`, `lint`) are declared as plain `def` (not `async def`). FastAPI automatically dispatches `def` endpoints to anyio's thread pool, so the event loop stays free while the LLM blocks (30–120 s on a local 7B model). Do **not** change them to `async def`.
 
 ---
 

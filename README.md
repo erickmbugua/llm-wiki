@@ -38,7 +38,7 @@ Every initialized vault has:
 │   └── schema.md     ← agent instructions for this vault
 └── .llm-wiki/
     ├── wiki.db       ← SQLite FTS5 index (gitignored)
-    └── config.json   ← per-vault model override
+    └── config.json   ← per-vault name, model, and context_chars overrides
 ```
 
 ### Global config
@@ -150,7 +150,7 @@ Available MCP tools: `search_wiki`, `view_page`, `list_pages`, `ingest`, `query`
 
 ## Key Data Flows
 
-**Ingest:** `raw/` file detected → `VaultWatcher` queues it → `ingest_source()` extracts text → LiteLLM generates wiki pages → pages written to `wiki/` → `reconcile()` updates FTS5 index → `log.md` appended.
+**Ingest:** `raw/` file detected → `VaultWatcher` queues it → `ingest_source()` extracts text → LiteLLM generates wiki pages → pages written to `wiki/` → `partial_reconcile()` updates FTS5 index for changed files only → `log.md` appended.
 
 **Query:** User question → `search()` FTS5 BM25 → top pages assembled as context → LiteLLM answers → optionally saved as new Concepts/ page.
 

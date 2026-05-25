@@ -41,7 +41,9 @@ export PATH="/path/to/llm-wiki/bin:$PATH"
 | `list` | List all registered vaults |
 | `status [--vault]` | Show page count, queue, model for a vault |
 | `use <vault>` | Set the default vault |
+| `unregister <vault>` | Remove a vault from the global registry (leaves files on disk) |
 | `set-model <model> [--vault]` | Set LiteLLM model string globally or per-vault |
+| `set-context <chars> [--vault]` | Set source text character limit globally or per-vault |
 | `ingest <source> [--vault] [--dry-run]` | Ingest a file or URL |
 | `query <question> [--vault] [--save-as]` | LLM Q&A from wiki content |
 | `lint [--vault]` | Structural + LLM lint pass |
