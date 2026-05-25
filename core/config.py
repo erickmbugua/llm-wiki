@@ -10,6 +10,26 @@ VAULT_INTERNAL_DIR = ".llm-wiki"
 VAULT_CONFIG_FILE = "config.json"
 VAULT_DB_FILE = "wiki.db"
 
+# Process-level config caches — eliminated repeated disk reads during a single operation.
+# Cleared by save() and by _clear_*_cache() helpers used in tests and server reset.
+_global_cfg_cache: GlobalConfig | None = None
+_vault_cfg_cache: dict[str, VaultConfig] = {}
+
+
+def _clear_global_config_cache() -> None:
+    """Invalidate the GlobalConfig process cache. Call after any mutation saved to disk."""
+    global _global_cfg_cache
+    _global_cfg_cache = None
+
+
+def _clear_vault_config_cache(vault_path: Path | None = None) -> None:
+    """Invalidate VaultConfig cache for one vault (or all vaults when vault_path is None)."""
+    global _vault_cfg_cache
+    if vault_path is None:
+        _vault_cfg_cache.clear()
+    else:
+        _vault_cfg_cache.pop(str(vault_path), None)
+
 
 @dataclass
 class GlobalConfig:
@@ -27,22 +47,35 @@ class GlobalConfig:
     def load(cls) -> GlobalConfig:
         """Load config from ~/.llm-wiki/config.json, returning defaults if the file is absent.
 
+        Results are cached for the lifetime of the process. Call ``_clear_global_config_cache()``
+        to force a re-read (e.g. after mutating the file from another code path).
+
         Automatically drops any registered vault whose path no longer exists on disk
         and updates the file if anything was removed.
         """
+        global _global_cfg_cache
+        if _global_cfg_cache is not None:
+            return _global_cfg_cache
         if GLOBAL_CONFIG_FILE.exists():
             data = json.loads(GLOBAL_CONFIG_FILE.read_text())
             instance = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
         else:
             instance = cls()
         if instance.reconcile_vaults():
-            instance.save()
-        return instance
+            instance.save()  # save() sets _global_cfg_cache = self
+            return instance
+        _global_cfg_cache = instance
+        return _global_cfg_cache
 
     def save(self) -> None:
-        """Persist the current config to ~/.llm-wiki/config.json, creating the directory if needed."""
+        """Persist the current config to ~/.llm-wiki/config.json, creating the directory if needed.
+
+        Also invalidates the process cache so the next ``load()`` reads the updated file.
+        """
         GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         GLOBAL_CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
+        global _global_cfg_cache
+        _global_cfg_cache = self
 
     def reconcile_vaults(self) -> list[str]:
         """Drop registered vaults whose paths no longer exist on disk.
@@ -107,20 +140,31 @@ class VaultConfig:
     def load(cls, vault_path: Path) -> VaultConfig:
         """Load per-vault config from <vault>/.llm-wiki/config.json, returning defaults if absent.
 
+        Results are cached per vault path for the lifetime of the process. Call
+        ``_clear_vault_config_cache(vault_path)`` to force a re-read after an external mutation.
+
         Args:
             vault_path: Root directory of the vault.
 
         Returns:
             A VaultConfig instance populated from disk (or default values).
         """
+        key = str(vault_path)
+        if key in _vault_cfg_cache:
+            return _vault_cfg_cache[key]
         cfg_file = vault_path / VAULT_INTERNAL_DIR / VAULT_CONFIG_FILE
         if cfg_file.exists():
             data = json.loads(cfg_file.read_text())
-            return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-        return cls()
+            instance = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        else:
+            instance = cls()
+        _vault_cfg_cache[key] = instance
+        return instance
 
     def save(self, vault_path: Path) -> None:
         """Persist per-vault config to <vault>/.llm-wiki/config.json.
+
+        Also updates the process cache so the next ``load()`` reflects the saved values.
 
         Args:
             vault_path: Root directory of the vault.
@@ -128,6 +172,7 @@ class VaultConfig:
         cfg_dir = vault_path / VAULT_INTERNAL_DIR
         cfg_dir.mkdir(parents=True, exist_ok=True)
         (cfg_dir / VAULT_CONFIG_FILE).write_text(json.dumps(asdict(self), indent=2))
+        _vault_cfg_cache[str(vault_path)] = self
 
 
 def resolve_model(vault_path: Path | None = None) -> str:

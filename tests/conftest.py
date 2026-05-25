@@ -58,12 +58,22 @@ def populated_vault(tmp_vault):
 
 @pytest.fixture
 def patched_global_config(tmp_path, monkeypatch):
-    """Redirect GlobalConfig I/O to a temp dir so tests never touch ~/.llm-wiki."""
+    """Redirect GlobalConfig I/O to a temp dir so tests never touch ~/.llm-wiki.
+
+    Also clears the process-level config caches before and after each test so that
+    stale cached values from one test cannot bleed into the next.
+    """
+    import core.config as cfg_mod
+
     cfg_dir = tmp_path / "global-cfg"
     cfg_dir.mkdir()
     monkeypatch.setattr("core.config.GLOBAL_CONFIG_DIR", cfg_dir)
     monkeypatch.setattr("core.config.GLOBAL_CONFIG_FILE", cfg_dir / "config.json")
-    return cfg_dir
+    cfg_mod._clear_global_config_cache()
+    cfg_mod._clear_vault_config_cache()
+    yield cfg_dir
+    cfg_mod._clear_global_config_cache()
+    cfg_mod._clear_vault_config_cache()
 
 
 # ── LLM mock helpers ─────────────────────────────────────────────────────────

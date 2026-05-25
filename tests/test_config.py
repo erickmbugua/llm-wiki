@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import core.config as cfg_mod
 from core.config import GlobalConfig, VaultConfig, resolve_context_chars, resolve_model
 
 # ── GlobalConfig ──────────────────────────────────────────────────────────────
@@ -231,3 +232,96 @@ class TestResolveContextChars:
             json.dumps({"name": "v", "model": None, "context_chars": 8_000})
         )
         assert resolve_context_chars(vault) == 8_000
+
+
+# ── Config caching ────────────────────────────────────────────────────────────
+
+
+class TestGlobalConfigCache:
+    def test_load_returns_same_instance_on_repeated_calls(self, patched_global_config):
+        """GlobalConfig.load() returns the cached instance without re-reading disk."""
+        first = GlobalConfig.load()
+        # Mutate the file on disk — cache should shield us
+        (patched_global_config / "config.json").write_text(
+            json.dumps(
+                {
+                    "vaults": {},
+                    "model": "mutated",
+                    "server_port": 8000,
+                    "default_vault": None,
+                    "context_chars": 24000,
+                    "chunk_size": 20000,
+                    "chunk_overlap": 500,
+                    "embedding_model": "ollama/nomic-embed-text",
+                    "embedding_dim": 768,
+                }
+            )
+        )
+        second = GlobalConfig.load()
+        assert first is second
+        assert second.model != "mutated"
+
+    def test_save_updates_cache_to_new_instance(self, patched_global_config):
+        """After save(), the next load() reflects the saved values without re-reading disk."""
+        cfg = GlobalConfig()
+        cfg.model = "before"
+        cfg.save()
+
+        cfg2 = GlobalConfig()
+        cfg2.model = "after"
+        cfg2.save()
+
+        loaded = GlobalConfig.load()
+        assert loaded.model == "after"
+
+    def test_clear_cache_forces_disk_read(self, patched_global_config):
+        """_clear_global_config_cache() causes the next load() to read from disk."""
+        GlobalConfig.load()  # populate cache
+        (patched_global_config / "config.json").write_text(
+            json.dumps(
+                {
+                    "vaults": {},
+                    "model": "fresh",
+                    "server_port": 8000,
+                    "default_vault": None,
+                    "context_chars": 24000,
+                    "chunk_size": 20000,
+                    "chunk_overlap": 500,
+                    "embedding_model": "ollama/nomic-embed-text",
+                    "embedding_dim": 768,
+                }
+            )
+        )
+        cfg_mod._clear_global_config_cache()
+        reloaded = GlobalConfig.load()
+        assert reloaded.model == "fresh"
+
+
+class TestVaultConfigCache:
+    def test_load_returns_same_instance_on_repeated_calls(self, tmp_vault):
+        """VaultConfig.load() returns the cached instance without re-reading disk."""
+        first = VaultConfig.load(tmp_vault)
+        cfg_file = tmp_vault / ".llm-wiki" / "config.json"
+        cfg_file.write_text(json.dumps({"name": "mutated", "model": "gpt-4o"}))
+        second = VaultConfig.load(tmp_vault)
+        assert first is second
+
+    def test_save_updates_cache_to_new_instance(self, tmp_vault):
+        """After save(), load() returns the new values without re-reading disk."""
+        VaultConfig.load(tmp_vault)  # populate cache
+
+        cfg = VaultConfig(name="Updated", model="claude-sonnet-4-6")
+        cfg.save(tmp_vault)
+
+        loaded = VaultConfig.load(tmp_vault)
+        assert loaded.model == "claude-sonnet-4-6"
+        assert loaded is cfg
+
+    def test_clear_cache_forces_disk_read(self, tmp_vault):
+        """_clear_vault_config_cache() causes the next load() to read from disk."""
+        VaultConfig.load(tmp_vault)  # populate cache
+        cfg_file = tmp_vault / ".llm-wiki" / "config.json"
+        cfg_file.write_text(json.dumps({"name": "fresh", "model": "fresh-model"}))
+        cfg_mod._clear_vault_config_cache(tmp_vault)
+        reloaded = VaultConfig.load(tmp_vault)
+        assert reloaded.model == "fresh-model"

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import GlobalConfig, VaultConfig
+from .config import GlobalConfig, VaultConfig, _clear_global_config_cache, _clear_vault_config_cache
 from .database import (
     create_job,
     get_db,
@@ -76,9 +76,11 @@ def _get_config() -> GlobalConfig:
 
 
 def _reset_config_cache() -> None:
-    """Invalidate the cached config. Call after any mutation to GlobalConfig on disk."""
+    """Invalidate all config caches. Call after any mutation to GlobalConfig on disk."""
     global _config_cache
     _config_cache = None
+    _clear_global_config_cache()
+    _clear_vault_config_cache()
 
 
 # ---------------------------------------------------------------------------
