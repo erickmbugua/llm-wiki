@@ -63,6 +63,36 @@ class TestExtractText:
         text, _ = _extract_text(str(f))
         assert len(text) == 24_000
 
+    def test_extract_docx_returns_text(self, tmp_path):
+        import docx
+
+        doc = docx.Document()
+        doc.add_paragraph("First paragraph")
+        doc.add_paragraph("Second paragraph")
+        path = tmp_path / "test.docx"
+        doc.save(str(path))
+        text, name = _extract_text(str(path))
+        assert "First paragraph" in text
+        assert "Second paragraph" in text
+        assert name == "test.docx"
+
+    def test_extract_docx_missing_package_returns_empty(self, tmp_path):
+        import sys
+
+        path = tmp_path / "doc.docx"
+        path.write_bytes(b"fake")
+        with patch.dict(sys.modules, {"docx": None}):
+            from core.ingest import _extract_docx
+
+            result = _extract_docx(path)
+        assert result == ""
+
+    def test_binary_suffix_raises_value_error(self, tmp_path):
+        f = tmp_path / "data.xlsx"
+        f.write_bytes(b"PK\x03\x04fake")
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            _extract_text(str(f))
+
 
 # ── _parse_llm_json ───────────────────────────────────────────────────────────
 

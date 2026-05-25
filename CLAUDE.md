@@ -99,7 +99,7 @@ Check whether stubs exist before writing any suppressions:
 pip index versions types-<packagename>
 ```
 
-Current dev stubs installed: `types-requests`, `types-beautifulsoup4`, `pypdf` (inline types).
+Current dev stubs installed: `types-requests`, `types-beautifulsoup4`, `pypdf` (inline types), `python-docx` (inline types — suppress attribute access with `# pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]`).
 
 ---
 

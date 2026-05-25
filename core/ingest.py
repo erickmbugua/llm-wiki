@@ -32,6 +32,26 @@ _ollama_verified: set[str] = set()
 SOURCE_CHAR_LIMIT = 24_000
 RELATED_PAGES_LIMIT = 5
 
+_BINARY_SUFFIXES = frozenset(
+    {
+        ".xlsx",
+        ".xls",
+        ".pptx",
+        ".ppt",
+        ".doc",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".mp3",
+        ".mp4",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -194,12 +214,20 @@ def _check_ollama(model: str) -> None:
 def _extract_text(source: str) -> tuple[str, str]:
     """Dispatch text extraction to the appropriate handler based on the source string.
 
+    Supported formats: .txt, .md, .pdf, .docx, and HTTP/HTTPS URLs.
+    Known binary formats (.xlsx, .xls, .pptx, .ppt, .doc, images, archives, media)
+    raise ValueError immediately rather than feeding garbled bytes to the LLM.
+    Unknown text-like formats fall back to plain-text reading.
+
     Args:
         source: A file path or HTTP/HTTPS URL.
 
     Returns:
         A tuple of (extracted_text, display_name). Text is capped at ``SOURCE_CHAR_LIMIT``
         characters. Returns ``("", source)`` when extraction is not possible.
+
+    Raises:
+        ValueError: The file extension is a known unsupported binary format.
     """
     if source.startswith("http://") or source.startswith("https://"):
         return _fetch_url(source)
@@ -213,7 +241,14 @@ def _extract_text(source: str) -> tuple[str, str]:
         return p.read_text(errors="replace")[:SOURCE_CHAR_LIMIT], p.name
     if suffix == ".pdf":
         return _extract_pdf(p), p.name
-    # fallback: try reading as text
+    if suffix == ".docx":
+        return _extract_docx(p), p.name
+    if suffix in _BINARY_SUFFIXES:
+        raise ValueError(
+            f"Unsupported file type '{suffix}'. "
+            "Supported formats: .txt, .md, .pdf, .docx, and HTTP/HTTPS URLs."
+        )
+    # fallback: try reading as text (handles .rst, .yaml, .json, etc.)
     try:
         return p.read_text(errors="replace")[:SOURCE_CHAR_LIMIT], p.name
     except Exception:
@@ -262,6 +297,31 @@ def _extract_pdf(path: Path) -> str:
         return "\n".join(pages)[:SOURCE_CHAR_LIMIT]
     except ImportError:
         log.warning("pypdf not installed; install it for PDF support: pip install pypdf")
+        return ""
+
+
+def _extract_docx(path: Path) -> str:
+    """Extract plain text from a .docx file using python-docx.
+
+    Args:
+        path: Path to the .docx file.
+
+    Returns:
+        Concatenated paragraph text capped at ``SOURCE_CHAR_LIMIT`` characters,
+        or an empty string if python-docx is not installed.
+    """
+    try:
+        import docx  # python-docx package name is 'docx' at import time  # pyright: ignore[reportMissingImports]
+
+        doc = docx.Document(str(path))  # pyright: ignore[reportUnknownMemberType]
+        text = "\n".join(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+            p.text for p in doc.paragraphs if p.text.strip()
+        )
+        return text[:SOURCE_CHAR_LIMIT]
+    except ImportError:
+        log.warning(
+            "python-docx not installed; install it for .docx support: pip install python-docx"
+        )
         return ""
 
 
