@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import VAULT_INTERNAL_DIR, VaultConfig
-from .database import get_db, list_pages
+from .db import get_db, list_pages
 
 WIKI_SUBDIRS = ["Sources", "Concepts", "Entities"]
 

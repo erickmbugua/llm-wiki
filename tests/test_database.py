@@ -1,4 +1,4 @@
-"""Tests for core/database.py — schema, CRUD, FTS5 search, reconcile, backlinks, queue."""
+"""Tests for core/db/ sub-package — schema, CRUD, FTS5 search, reconcile, backlinks, queue."""
 
 import json
 import time
@@ -6,12 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.database import (
-    _extract_summary,
-    _infer_category,
-    _rebuild_backlinks_full,
-    _rebuild_backlinks_incremental,
-    compute_embedding,
+from core.db import (
     create_job,
     delete_page,
     get_db,
@@ -30,6 +25,9 @@ from core.database import (
     upsert_page,
     vector_search,
 )
+from core.db.pages import _extract_summary, _infer_category
+from core.db.reconcile import _rebuild_backlinks_full, _rebuild_backlinks_incremental
+from core.embeddings import compute_embedding
 
 # ── Schema / get_db ───────────────────────────────────────────────────────────
 
@@ -410,7 +408,7 @@ class TestRebuildBacklinksCollision:
         upsert_page(conn, wiki, wiki / "Concepts" / "Python.md")
         upsert_page(conn, wiki, wiki / "Entities" / "Python.md")
 
-        with caplog.at_level(logging.WARNING, logger="core.database"):
+        with caplog.at_level(logging.WARNING, logger="core.db.reconcile"):
             _rebuild_backlinks_full(conn)  # must not raise
 
         assert any("collision" in msg.lower() or "Python" in msg for msg in caplog.messages)
@@ -531,7 +529,7 @@ class TestLinksTable:
         upsert_page(conn, wiki, wiki / "Concepts" / "Dup.md")
         upsert_page(conn, wiki, wiki / "Entities" / "Dup.md")
 
-        with caplog.at_level(logging.WARNING, logger="core.database"):
+        with caplog.at_level(logging.WARNING, logger="core.db.reconcile"):
             _rebuild_backlinks_full(conn)
 
         assert any("collision" in msg.lower() or "Dup" in msg for msg in caplog.messages)
@@ -606,7 +604,7 @@ class TestSemanticSearch:
     def test_compute_embedding_returns_list_of_floats(self):
         fake_response = MagicMock()
         fake_response.data = [MagicMock(embedding=[0.1] * _DIM)]
-        with patch("core.database.litellm.embedding", return_value=fake_response):
+        with patch("core.embeddings.litellm.embedding", return_value=fake_response):
             result = compute_embedding("hello world", model="ollama/nomic-embed-text")
         assert isinstance(result, list)
         assert len(result) == _DIM
@@ -614,7 +612,7 @@ class TestSemanticSearch:
 
     def test_compute_embedding_raises_runtime_error_on_failure(self):
         with (
-            patch("core.database.litellm.embedding", side_effect=ConnectionError("model down")),
+            patch("core.embeddings.litellm.embedding", side_effect=ConnectionError("model down")),
             pytest.raises(RuntimeError, match="Embedding failed"),
         ):
             compute_embedding("hello", model="bad-model")

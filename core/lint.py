@@ -11,7 +11,7 @@ from typing import Any
 import litellm
 
 from .config import resolve_model
-from .database import get_db, list_pages, reconcile
+from .db import get_db, list_pages, reconcile
 
 log = logging.getLogger(__name__)
 

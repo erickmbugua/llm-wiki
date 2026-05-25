@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.database import get_db, reconcile
+from core.db import get_db, reconcile
 from core.vault import init_vault
 
 # ── Vault fixtures ────────────────────────────────────────────────────────────

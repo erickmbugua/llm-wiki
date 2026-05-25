@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from core.database import get_db, get_pending_queue
+from core.db import get_db, get_pending_queue
 from core.watcher import IGNORED_SUFFIXES, VaultWatcher
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from core.database import get_db, reconcile
+from core.db import get_db, list_pages, reconcile
 from core.lint import _save_lint_report, _structural_checks, lint_vault
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -23,8 +23,6 @@ def _reconciled_pages(vault_path: Path) -> list[dict]:
     wiki = vault_path / "wiki"
     conn = get_db(vault_path)
     reconcile(conn, wiki)
-    from core.database import list_pages
-
     pages = list_pages(conn)
     conn.close()
     return pages

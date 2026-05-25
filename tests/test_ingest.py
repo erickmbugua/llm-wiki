@@ -565,7 +565,7 @@ class TestCheckOllama:
 class TestIngestQueued:
     def test_success_status_transitions(self, tmp_vault):
         """Queue item transitions pending → processing → done on success."""
-        from core.database import get_db, get_pending_queue, queue_raw_file
+        from core.db import get_db, get_pending_queue, queue_raw_file
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)
@@ -592,7 +592,7 @@ class TestIngestQueued:
 
     def test_ingest_source_called_with_absolute_path(self, tmp_vault):
         """ingest_queued reconstructs the absolute path before calling ingest_source."""
-        from core.database import get_db, queue_raw_file
+        from core.db import get_db, queue_raw_file
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)
@@ -613,7 +613,7 @@ class TestIngestQueued:
 
     def test_failure_status_transitions(self, tmp_vault):
         """Queue item transitions pending → processing → failed on exception."""
-        from core.database import get_db, queue_raw_file
+        from core.db import get_db, queue_raw_file
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)
@@ -630,7 +630,7 @@ class TestIngestQueued:
 
     def test_single_db_connection_used(self, tmp_vault):
         """ingest_queued opens exactly one DB connection for the entire queue."""
-        from core.database import get_db, queue_raw_file
+        from core.db import get_db, queue_raw_file
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)

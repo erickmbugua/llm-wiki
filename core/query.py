@@ -8,7 +8,8 @@ from typing import Any
 import litellm
 
 from .config import resolve_embedding_config, resolve_model
-from .database import compute_embedding, get_db, hybrid_search, reconcile
+from .db import get_db, hybrid_search, reconcile
+from .embeddings import compute_embedding
 
 log = logging.getLogger(__name__)
 

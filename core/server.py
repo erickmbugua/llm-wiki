@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import GlobalConfig, VaultConfig, _clear_global_config_cache, _clear_vault_config_cache
-from .database import (
+from .db import (
     create_job,
     get_db,
     get_job,

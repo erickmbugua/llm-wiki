@@ -38,7 +38,7 @@ from mcp.types import (
 )
 
 from core.config import GlobalConfig
-from core.database import get_db, list_pages, search
+from core.db import get_db, list_pages, search
 
 
 def build_server(default_vault: str | None = None) -> Server:

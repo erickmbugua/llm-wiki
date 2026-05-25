@@ -23,7 +23,7 @@ from pathlib import Path
 import uvicorn
 
 from core.config import GlobalConfig, VaultConfig
-from core.database import create_job, get_db
+from core.db import create_job, get_db
 from core.server import _run_ingest_job, register_vault_executor
 from core.watcher import VaultWatcher
 

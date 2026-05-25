@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import textwrap
 from datetime import datetime
 from pathlib import Path
@@ -19,8 +20,7 @@ from .config import (
     resolve_embedding_config,
     resolve_model,
 )
-from .database import (
-    compute_embedding,
+from .db import (
     get_db,
     get_page,
     get_pending_queue,
@@ -29,6 +29,7 @@ from .database import (
     partial_reconcile,
     upsert_page,
 )
+from .embeddings import compute_embedding
 from .vault import rebuild_index
 
 log = logging.getLogger(__name__)
@@ -306,7 +307,7 @@ def _summarize_chunks(
 
 
 def _store_embeddings(
-    conn: object,
+    conn: sqlite3.Connection,
     wiki_root: Path,
     written_paths: list[Path],
     vault_path: Path,
@@ -322,11 +323,6 @@ def _store_embeddings(
         written_paths: Absolute paths to pages just written by this ingest.
         vault_path: Root of the vault (used to resolve the embedding model).
     """
-    import sqlite3 as _sqlite3
-
-    if not isinstance(conn, _sqlite3.Connection):
-        return
-
     emb_model, _ = resolve_embedding_config(vault_path)
     for page_path in written_paths:
         if not page_path.exists():

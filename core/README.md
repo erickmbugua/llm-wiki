@@ -9,8 +9,16 @@ The shared Python library used by the CLI (`main.py`), the web server (`core/ser
 ```
 core/
 ├── config.py       Global + per-vault configuration
+├── embeddings.py   compute_embedding() — provider-agnostic litellm embedding call
+├── db/             SQLite persistence layer (split by concern)
+│   ├── __init__.py     Re-exports all public symbols
+│   ├── connection.py   get_db(), schema DDL
+│   ├── pages.py        Page CRUD + category/summary helpers
+│   ├── search.py       FTS5, vector KNN, hybrid RRF search
+│   ├── reconcile.py    Filesystem ↔ DB sync, backlink graph
+│   ├── queue.py        ingest_queue CRUD
+│   └── jobs.py         ingest_jobs CRUD
 ├── vault.py        Vault init and stats
-├── database.py     SQLite FTS5: indexing, search, reconciliation
 ├── watcher.py      Watchdog file monitor on raw/
 ├── ingest.py       Text extraction + LLM-powered page generation
 ├── query.py        FTS5 context + LLM-powered Q&A
@@ -81,9 +89,20 @@ Generate the initial content for the three special wiki files. `_index_template`
 
 ---
 
-## database.py
+## embeddings.py
 
-The persistence layer. All reads/writes to `wiki.db` go through here.
+**`compute_embedding(text, model) → list[float]`**
+Calls `litellm.embedding` and returns a dense float vector. Raises `RuntimeError` if the
+model is unavailable. Truncates input to 8192 chars. Patch target in tests:
+`"core.embeddings.litellm.embedding"`.
+
+---
+
+## db/
+
+The persistence layer. All reads/writes to `wiki.db` go through here. Import public symbols
+from `core.db`; import private helpers directly from their sub-module
+(e.g. `from core.db.pages import _infer_category`).
 
 ### Schema
 

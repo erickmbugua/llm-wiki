@@ -13,7 +13,7 @@ from watchdog.events import (
 )
 from watchdog.observers import Observer
 
-from .database import get_db, queue_raw_file
+from .db import get_db, queue_raw_file
 
 log = logging.getLogger(__name__)
 

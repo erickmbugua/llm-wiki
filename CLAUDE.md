@@ -275,6 +275,24 @@ The executor registry (`_vault_executors` in `core/server.py`) is populated by `
 at startup via `register_vault_executor()`. When the server is started without `main_server.py`
 (e.g. direct uvicorn or tests), a one-shot `ThreadPoolExecutor` is created on the fly.
 
+### db/ sub-package — import paths
+All database symbols are imported from `core.db` (or its sub-modules for private helpers):
+```python
+from core.db import get_db, search, reconcile   # public API
+from core.db.pages import _infer_category       # private helpers — import from sub-module directly
+from core.db.reconcile import _rebuild_backlinks_full
+```
+Embedding computation is in `core.embeddings`, not `core.db`:
+```python
+from core.embeddings import compute_embedding
+```
+When patching in tests, target the sub-module where the name is defined:
+```python
+patch("core.embeddings.litellm.embedding", ...)   # not core.db.litellm.embedding
+```
+When using `caplog` to capture warnings from `_rebuild_backlinks_full`, the logger is
+`"core.db.reconcile"` (the module's `__name__`), not `"core.database"`.
+
 ### sqlite-vec extension loading
 `get_db` loads the `sqlite-vec` extension on every connection:
 ```python
@@ -323,7 +341,15 @@ pages: list[str] = [p.extract_text() or "" for p in reader.pages]  # pyright: ig
 llm-wiki/
 ├── core/
 │   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars(), resolve_chunk_config(), resolve_embedding_config()
-│   ├── database.py    # SQLite FTS5 + vec0 engine, CRUD, reconcile, backlinks, queue, hybrid search, embeddings
+│   ├── embeddings.py  # compute_embedding() — litellm embedding call, returns list[float]
+│   ├── db/            # SQLite persistence layer (split by concern)
+│   │   ├── __init__.py    # Re-exports all public symbols; sub-module map in docstring
+│   │   ├── connection.py  # get_db(), _ensure_schema() — connection lifecycle + schema DDL
+│   │   ├── pages.py       # upsert_page(), delete_page(), get_page(), list_pages(), _infer_category(), _extract_summary()
+│   │   ├── search.py      # search() FTS5, vector_search() KNN, hybrid_search() RRF
+│   │   ├── reconcile.py   # reconcile(), partial_reconcile(), _rebuild_backlinks_full/incremental()
+│   │   ├── queue.py       # queue_raw_file(), get_pending_queue(), mark_queue_item()
+│   │   └── jobs.py        # create_job(), update_job_status(), get_job(), list_jobs()
 │   ├── ingest.py      # Text extraction, chunking, LLM page generation, embedding storage, queue processing
 │   ├── lint.py        # Structural checks + LLM contradiction review
 │   ├── mcp_server.py  # MCP stdio server (7 tools for Claude Code / Cursor)
