@@ -73,13 +73,10 @@ Every initialized vault has:
 ## Quickstart
 
 ```bash
-# 1. Create and activate a virtualenv
-python3 -m venv .venv && source .venv/bin/activate
+# 1. Install dependencies (creates .venv automatically)
+uv sync --extra dev
 
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Initialize a vault
+# 2. Initialize a vault
 bin/llm-wiki init ~/Obsidian-Vaults/AI-Agents --name AI-Agents
 
 # 4. Set the LLM model (litellm model string)

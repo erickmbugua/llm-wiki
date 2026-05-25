@@ -102,7 +102,7 @@ When adding a new dependency, determine which category it falls into and apply t
 
 Check whether stubs exist before writing any suppressions:
 ```bash
-pip index versions types-<packagename>
+uv pip index versions types-<packagename>
 ```
 
 Current dev stubs installed: `types-requests`, `types-beautifulsoup4`, `pypdf` (inline types), `python-docx` (inline types — suppress attribute access with `# pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]`).
@@ -111,7 +111,17 @@ Current dev stubs installed: `types-requests`, `types-beautifulsoup4`, `pypdf` (
 
 ## Toolchain
 
-All tools run from the project venv: `.venv/bin/<tool>`
+Dependencies are managed with **uv**. `pyproject.toml` is the source of truth; `uv.lock` pins
+exact versions. Never `pip install` directly into `.venv` — changes go through `pyproject.toml`
+then `uv sync`.
+
+```bash
+uv sync --extra dev   # install / update deps after pyproject.toml changes
+uv add <pkg>          # add a runtime dependency
+uv add --dev <pkg>    # add a dev-only dependency
+```
+
+All QA tools run from the project venv: `.venv/bin/<tool>`
 
 | Tool | Purpose | Command |
 |------|---------|---------|
