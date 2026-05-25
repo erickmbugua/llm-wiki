@@ -131,14 +131,25 @@ def ingest_source(
     response = litellm.completion(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
+        temperature=0.0,
     )
     raw = response.choices[0].message.content  # pyright: ignore[reportAttributeAccessIssue]
     if not raw:
         raise ValueError("LLM returned an empty response for ingest")
     raw = str(raw)  # narrow Unknown | str | None → str after the guard above
 
-    result = _parse_llm_json(raw)
+    try:
+        result = _parse_llm_json(raw)
+    except ValueError:
+        log.warning("JSON parse failed for '%s'; retrying with constrained prompt", display_name)
+        prompt_retry = _build_ingest_prompt_strict(vault_name, schema, related, display_name, text)
+        response_retry = litellm.completion(
+            model=model,
+            messages=[{"role": "user", "content": prompt_retry}],
+            temperature=0.0,
+        )
+        raw_retry = str(response_retry.choices[0].message.content or "")  # pyright: ignore[reportAttributeAccessIssue]
+        result = _parse_llm_json(raw_retry)  # let ValueError propagate on second failure
     if not dry_run:
         written = _write_pages(wiki_root, result)
         conn = get_db(vault_path)
@@ -631,8 +642,39 @@ def _build_ingest_prompt(
     """).strip()
 
 
+def _build_ingest_prompt_strict(
+    vault_name: str, schema: str, related: str, filename: str, text: str
+) -> str:
+    """Assemble a stricter ingest prompt for retry when the initial JSON parse fails.
+
+    Identical to ``_build_ingest_prompt`` but prepends an explicit constraint
+    requiring the response to be a bare JSON object with no surrounding prose or fences.
+
+    Args:
+        vault_name: Name of the vault.
+        schema: Content of wiki/schema.md.
+        related: Pre-formatted related page snippets.
+        filename: Display name of the source.
+        text: Extracted source text.
+
+    Returns:
+        A single prompt string with a leading JSON-only constraint.
+    """
+    preamble = textwrap.dedent("""\
+        IMPORTANT: Your entire response must be a single valid JSON object.
+        Do not write any text before or after the JSON.
+        Do not use markdown code fences.
+        Start your response with { and end with }.
+
+    """)
+    return preamble + _build_ingest_prompt(vault_name, schema, related, filename, text)
+
+
 def _parse_llm_json(raw: str) -> dict[str, Any]:
-    """Parse the LLM's JSON response, stripping any accidental markdown code fences.
+    """Parse the LLM's JSON response, attempting repair before failing.
+
+    Strips markdown fences, tries json.loads, then json_repair.repair_json as a fallback.
+    Logs a warning when repair is needed so the user can see which models are unreliable.
 
     Args:
         raw: Raw string returned by the LLM.
@@ -641,15 +683,36 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
         Parsed dict containing at least ``source_page`` and ``page_updates`` keys.
 
     Raises:
-        ValueError: The string is not valid JSON or is missing the ``source_page`` key.
+        ValueError: The string could not be parsed or repaired into valid JSON,
+            or the repaired result is missing the ``source_page`` key.
     """
-    # Strip markdown fences if the model added them anyway
-    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
-    raw = re.sub(r"\s*```$", "", raw.strip(), flags=re.MULTILINE)
+    from json_repair import repair_json
+
+    # Strip markdown fences and leading/trailing prose
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.MULTILINE)
+
+    # Find the outermost JSON object — handles prose before/after the JSON block
+    obj_match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+    if obj_match:
+        cleaned = obj_match.group(0)
+
+    # First attempt: standard parse (fast path, works for well-formed output)
     try:
-        data: dict[str, Any] = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"LLM returned invalid JSON: {e}\n\nRaw output:\n{raw[:500]}") from e
+        data: dict[str, Any] = json.loads(cleaned)
+    except json.JSONDecodeError:
+        log.warning(
+            "LLM output was not valid JSON; attempting repair. "
+            "Consider using a larger model or structured output."
+        )
+        try:
+            repaired = repair_json(cleaned, return_objects=False)
+            data = json.loads(repaired)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(
+                f"LLM returned JSON that could not be repaired: {e}\n\nRaw output:\n{raw[:500]}"
+            ) from e
+
     if "source_page" not in data:
         raise ValueError("LLM response missing 'source_page' key")
     data.setdefault("page_updates", [])

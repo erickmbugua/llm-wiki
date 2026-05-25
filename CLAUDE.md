@@ -119,7 +119,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (235 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (241 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
@@ -137,6 +137,14 @@ access on the union. Since we never stream, suppress with:
 response.choices[0].message.content  # pyright: ignore[reportAttributeAccessIssue]
 ```
 `.content` can also be `None` — always use `or ""` before calling `.strip()`.
+
+### JSON parsing resilience in ingest
+`_parse_llm_json` uses a two-step parse strategy: fast-path `json.loads`, then
+`json_repair.repair_json` as a fallback for near-valid LLM output (trailing commas,
+single quotes, missing closing braces, prose wrapping). If repair fails, a second LLM call
+is made via `_build_ingest_prompt_strict`, which prepends a JSON-only constraint.
+The ingest LLM call uses `temperature=0.0` — structured JSON output benefits from
+determinism; `temperature=0.3` is kept for `query_wiki` and `temperature=0.2` for `lint_vault`.
 
 ### Ollama local model setup
 The default model is `ollama/qwen2.5-coder:7b`. Before running any ingest, Ollama must be

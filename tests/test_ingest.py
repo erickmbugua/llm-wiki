@@ -196,12 +196,44 @@ class TestParseLlmJson:
         assert result["page_updates"] == []
 
     def test_raises_on_invalid_json(self):
-        with pytest.raises(ValueError, match="invalid JSON"):
+        with pytest.raises(ValueError):
             _parse_llm_json("not json at all")
 
     def test_raises_when_source_page_missing(self):
         with pytest.raises(ValueError, match="missing 'source_page'"):
             _parse_llm_json(json.dumps({"page_updates": []}))
+
+    def test_trailing_comma_is_repaired(self):
+        raw = '{"source_page": {"file_path": "Sources/X.md", "content": "# X"},}'
+        result = _parse_llm_json(raw)
+        assert result["source_page"]["file_path"] == "Sources/X.md"
+
+    def test_single_quotes_are_repaired(self):
+        raw = "{'source_page': {'file_path': 'Sources/X.md', 'content': '# X'}}"
+        result = _parse_llm_json(raw)
+        assert result["source_page"]["file_path"] == "Sources/X.md"
+
+    def test_prose_before_json_is_extracted(self):
+        payload = json.dumps(
+            {"source_page": {"file_path": "Sources/X.md", "content": "# X"}, "page_updates": []}
+        )
+        raw = f"Here is the JSON output as requested:\n\n{payload}"
+        result = _parse_llm_json(raw)
+        assert result["source_page"]["file_path"] == "Sources/X.md"
+
+    def test_unrepairable_raises_value_error(self):
+        with pytest.raises(ValueError):
+            _parse_llm_json("completely unparseable @@@ !!!")
+
+    def test_missing_source_page_after_repair_raises(self):
+        raw = '{"page_updates": [],}'
+        with pytest.raises(ValueError, match="missing 'source_page'"):
+            _parse_llm_json(raw)
+
+    def test_missing_closing_brace_is_repaired(self):
+        raw = '{"source_page": {"file_path": "Sources/X.md", "content": "# X"}'
+        result = _parse_llm_json(raw)
+        assert result["source_page"]["file_path"] == "Sources/X.md"
 
 
 # ── _write_pages ──────────────────────────────────────────────────────────────
