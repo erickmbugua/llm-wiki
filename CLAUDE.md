@@ -13,6 +13,10 @@ Vanilla JS dashboard, watchdog file watcher.
 - Global config at `~/.llm-wiki/config.json`; per-vault config at `<vault>/.llm-wiki/config.json`
 - SQLite FTS5 with porter ASCII tokenizer, BM25 ranking, content-table triggers
 - MCP server exposes wiki operations as tools for Claude Code / Cursor
+- **Auto-ingest**: dropping a file into `raw/` triggers automatic ingest via watchdog → per-vault
+  `ThreadPoolExecutor(max_workers=1)`. Serial execution prevents memory oversubscription on local
+  7B models. The executor is started in `main_server.py`; the watcher in `core/watcher.py` is
+  responsible only for detecting files and queuing them.
 
 ---
 
