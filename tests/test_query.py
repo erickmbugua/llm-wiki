@@ -2,7 +2,8 @@
 
 from unittest.mock import patch
 
-from core.query import _build_context, _build_query_prompt, _save_answer, query_wiki
+from core.prompts import _build_query_prompt
+from core.query import _build_context, _save_answer, query_wiki
 
 # ── _build_context ────────────────────────────────────────────────────────────
 

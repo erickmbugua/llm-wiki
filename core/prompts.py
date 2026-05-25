@@ -1,9 +1,11 @@
-"""Prompt assembly and LLM JSON parsing for the ingest pipeline.
+"""Prompt assembly and LLM JSON parsing for the wiki pipeline.
 
 Public surface:
 - _build_ingest_prompt()        — assemble the primary ingest prompt
 - _build_ingest_prompt_strict() — retry variant with explicit JSON-only constraint
 - _parse_llm_json()             — parse (and repair) the LLM's JSON response
+- _build_query_prompt()         — assemble the Q&A prompt for query_wiki
+- _build_lint_prompt()          — assemble the quality-review prompt for lint_vault
 """
 
 from __future__ import annotations
@@ -156,3 +158,57 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
         raise ValueError("LLM response missing 'source_page' key")
     data.setdefault("page_updates", [])
     return data
+
+
+def _build_query_prompt(question: str, context: str) -> str:
+    """Assemble the LLM prompt for answering a question from wiki context.
+
+    Args:
+        question: The user's question.
+        context: Pre-formatted wiki page snippets to ground the answer.
+
+    Returns:
+        A single prompt string ready to be sent as a user message to the LLM.
+    """
+    return textwrap.dedent(f"""
+        You are answering a question using content from a personal wiki knowledge base.
+        Answer based strictly on the wiki content provided. If information is missing or
+        uncertain, say so clearly. Be concise and cite which pages support your answer.
+
+        ## Wiki Context
+        {context}
+
+        ## Question
+        {question}
+
+        Provide a direct answer followed by a brief **Sources** section listing the wiki
+        pages you used (by title and path).
+    """).strip()
+
+
+def _build_lint_prompt(pages_context: str) -> str:
+    """Assemble the LLM prompt for the wiki quality-review pass.
+
+    Args:
+        pages_context: Pre-formatted block of page snippets (title, path, content preview).
+
+    Returns:
+        A single prompt string ready to be sent as a user message to the LLM.
+    """
+    return textwrap.dedent(f"""
+        You are auditing a personal wiki knowledge base for quality and consistency.
+
+        ## Wiki Pages (Sample)
+        {pages_context}
+
+        ## Your Task
+        Review the pages above and produce a concise markdown lint report covering:
+
+        1. **Contradictions** — factual conflicts between pages (quote the conflicting claims)
+        2. **Incomplete Pages** — pages that seem underdeveloped or missing key information
+        3. **Missing Links** — concepts mentioned but not yet linked or given their own page
+        4. **Suggestions** — 2-3 concrete improvements for this vault
+
+        Format your response as a markdown document with these four sections.
+        Be specific: reference pages by name and quote relevant text when flagging issues.
+    """).strip()

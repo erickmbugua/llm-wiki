@@ -10,6 +10,7 @@ import litellm
 from .config import resolve_embedding_config, resolve_model
 from .db import db_connection, hybrid_search, reconcile
 from .embeddings import compute_embedding
+from .prompts import _build_query_prompt
 
 log = logging.getLogger(__name__)
 
@@ -101,32 +102,6 @@ def _build_context(vault_path: Path, wiki_root: Path, question: str) -> tuple[st
             sources.append(r["file_path"])
 
     return "\n\n---\n\n".join(parts), sources
-
-
-def _build_query_prompt(question: str, context: str) -> str:
-    """Assemble the LLM prompt for answering a question from wiki context.
-
-    Args:
-        question: The user's question.
-        context: Pre-formatted wiki page snippets to ground the answer.
-
-    Returns:
-        A single prompt string ready to be sent as a user message to the LLM.
-    """
-    return textwrap.dedent(f"""
-        You are answering a question using content from a personal wiki knowledge base.
-        Answer based strictly on the wiki content provided. If information is missing or
-        uncertain, say so clearly. Be concise and cite which pages support your answer.
-
-        ## Wiki Context
-        {context}
-
-        ## Question
-        {question}
-
-        Provide a direct answer followed by a brief **Sources** section listing the wiki
-        pages you used (by title and path).
-    """).strip()
 
 
 def _save_answer(

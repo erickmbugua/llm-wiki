@@ -13,6 +13,7 @@ import litellm
 from .config import resolve_model
 from .constants import WIKI_CATEGORIES
 from .db import db_connection, list_pages, reconcile
+from .prompts import _build_lint_prompt
 
 log = logging.getLogger(__name__)
 
@@ -152,34 +153,6 @@ def _llm_lint(vault_path: Path, wiki_root: Path, pages: list[dict]) -> str:
         temperature=0.2,
     )
     return (response.choices[0].message.content or "").strip()  # pyright: ignore[reportAttributeAccessIssue]
-
-
-def _build_lint_prompt(pages_context: str) -> str:
-    """Assemble the LLM prompt for the wiki quality-review pass.
-
-    Args:
-        pages_context: Pre-formatted block of page snippets (title, path, content preview).
-
-    Returns:
-        A single prompt string ready to be sent as a user message to the LLM.
-    """
-    return textwrap.dedent(f"""
-        You are auditing a personal wiki knowledge base for quality and consistency.
-
-        ## Wiki Pages (Sample)
-        {pages_context}
-
-        ## Your Task
-        Review the pages above and produce a concise markdown lint report covering:
-
-        1. **Contradictions** — factual conflicts between pages (quote the conflicting claims)
-        2. **Incomplete Pages** — pages that seem underdeveloped or missing key information
-        3. **Missing Links** — concepts mentioned but not yet linked or given their own page
-        4. **Suggestions** — 2-3 concrete improvements for this vault
-
-        Format your response as a markdown document with these four sections.
-        Be specific: reference pages by name and quote relevant text when flagging issues.
-    """).strip()
 
 
 # ---------------------------------------------------------------------------
