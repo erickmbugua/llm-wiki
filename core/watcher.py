@@ -32,7 +32,8 @@ class _RawFolderHandler(FileSystemEventHandler):
         log.info("Raw file detected: %s", p.name)
         conn = get_db(self.vault_path)
         try:
-            queue_raw_file(conn, str(p))
+            rel = str(p.relative_to(self.vault_path))
+            queue_raw_file(conn, rel)
         finally:
             conn.close()
         if self.on_file:

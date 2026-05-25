@@ -119,7 +119,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (222 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (229 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.

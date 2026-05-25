@@ -180,10 +180,11 @@ def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
         pending = get_pending_queue(conn)
         results = []
         for item in pending:
-            fp = item["file_path"]
+            fp = item["file_path"]  # vault-relative, e.g. "raw/paper.pdf"
+            abs_fp = str(vault_path / fp)
             mark_queue_item(conn, fp, "processing")
             try:
-                r = ingest_source(vault_path, fp, vault_name)
+                r = ingest_source(vault_path, abs_fp, vault_name)
                 mark_queue_item(conn, fp, "done")
                 results.append({"file": fp, "status": "done", **r})
             except Exception as e:

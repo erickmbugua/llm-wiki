@@ -537,7 +537,7 @@ class TestIngestQueued:
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)
-        queue_raw_file(conn, "/fake/file.txt")
+        queue_raw_file(conn, "raw/file.txt")
         conn.commit()
         conn.close()
 
@@ -551,12 +551,33 @@ class TestIngestQueued:
 
         assert len(results) == 1
         assert results[0]["status"] == "done"
-        assert results[0]["file"] == "/fake/file.txt"
+        assert results[0]["file"] == "raw/file.txt"
 
         conn = get_db(tmp_vault)
         remaining = get_pending_queue(conn)
         conn.close()
         assert remaining == []
+
+    def test_ingest_source_called_with_absolute_path(self, tmp_vault):
+        """ingest_queued reconstructs the absolute path before calling ingest_source."""
+        from core.database import get_db, queue_raw_file
+        from core.ingest import ingest_queued
+
+        conn = get_db(tmp_vault)
+        queue_raw_file(conn, "raw/paper.pdf")
+        conn.commit()
+        conn.close()
+
+        success_result = {
+            "source_page": {"file_path": "Sources/Paper.md", "content": "# Paper"},
+            "page_updates": [],
+            "pages_written": ["Sources/Paper.md"],
+        }
+        with patch("core.ingest.ingest_source", return_value=success_result) as mock_ingest:
+            ingest_queued(tmp_vault, "TestVault")
+
+        called_source = mock_ingest.call_args[0][1]
+        assert called_source == str(tmp_vault / "raw" / "paper.pdf")
 
     def test_failure_status_transitions(self, tmp_vault):
         """Queue item transitions pending → processing → failed on exception."""
@@ -564,7 +585,7 @@ class TestIngestQueued:
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)
-        queue_raw_file(conn, "/fake/broken.txt")
+        queue_raw_file(conn, "raw/broken.txt")
         conn.commit()
         conn.close()
 
@@ -581,8 +602,8 @@ class TestIngestQueued:
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)
-        queue_raw_file(conn, "/fake/a.txt")
-        queue_raw_file(conn, "/fake/b.txt")
+        queue_raw_file(conn, "raw/a.txt")
+        queue_raw_file(conn, "raw/b.txt")
         conn.commit()
         conn.close()
 

@@ -510,7 +510,8 @@ def queue_raw_file(conn: sqlite3.Connection, file_path: str) -> None:
 
     Args:
         conn: Open database connection.
-        file_path: Absolute or vault-relative path to the raw file.
+        file_path: Vault-relative path to the raw file (e.g. ``"raw/paper.pdf"``).
+            Always use a path relative to the vault root, never an absolute path.
     """
     conn.execute(
         """
