@@ -278,11 +278,27 @@ class TestIngestQueue:
         pending = get_pending_queue(db_conn)
         assert any(p["file_path"] == "/tmp/source.pdf" for p in pending)
 
-    def test_duplicate_file_ignored(self, db_conn):
+    def test_duplicate_file_stays_single_row(self, db_conn):
         queue_raw_file(db_conn, "/tmp/dup.pdf")
         queue_raw_file(db_conn, "/tmp/dup.pdf")
         pending = [p for p in get_pending_queue(db_conn) if p["file_path"] == "/tmp/dup.pdf"]
         assert len(pending) == 1
+
+    def test_requeue_failed_file_resets_to_pending(self, db_conn):
+        queue_raw_file(db_conn, "/tmp/retry.pdf")
+        mark_queue_item(db_conn, "/tmp/retry.pdf", "failed", error="timeout")
+        # dropping the same file again should reset it so it can be retried
+        queue_raw_file(db_conn, "/tmp/retry.pdf")
+        pending = get_pending_queue(db_conn)
+        match = next((p for p in pending if p["file_path"] == "/tmp/retry.pdf"), None)
+        assert match is not None, "re-queued file should appear as pending"
+        row = db_conn.execute(
+            "SELECT status, error, processed_at FROM ingest_queue WHERE file_path=?",
+            ("/tmp/retry.pdf",),
+        ).fetchone()
+        assert row["status"] == "pending"
+        assert row["error"] is None
+        assert row["processed_at"] is None
 
     def test_mark_queue_item_done(self, db_conn):
         queue_raw_file(db_conn, "/tmp/done.pdf")

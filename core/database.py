@@ -304,7 +304,11 @@ def _rebuild_backlinks(conn: sqlite3.Connection) -> None:
 def queue_raw_file(conn: sqlite3.Connection, file_path: str) -> None:
     """Add a raw file path to the ingest queue with status ``"pending"``.
 
-    Silently ignores duplicates (ON CONFLICT DO NOTHING).
+    If the file is already in the queue, re-queuing resets its status to
+    ``"pending"``, clears the error field, and updates the timestamp.  This
+    makes repeated calls a natural retry mechanism — re-dropping a file into
+    ``raw/`` is enough to trigger a fresh ingest attempt after a previous
+    failure, with no special-case logic required.
 
     Args:
         conn: Open database connection.
@@ -314,7 +318,11 @@ def queue_raw_file(conn: sqlite3.Connection, file_path: str) -> None:
         """
         INSERT INTO ingest_queue (file_path, added_at)
         VALUES (?, ?)
-        ON CONFLICT(file_path) DO NOTHING
+        ON CONFLICT(file_path) DO UPDATE SET
+            status       = 'pending',
+            error        = NULL,
+            added_at     = excluded.added_at,
+            processed_at = NULL
     """,
         (file_path, datetime.now(timezone.utc).timestamp()),
     )
