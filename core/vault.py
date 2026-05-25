@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import VAULT_INTERNAL_DIR, VaultConfig
 from .constants import WIKI_CATEGORIES
-from .db import get_db, list_pages
+from .db import db_connection, list_pages
 
 
 def init_vault(vault_path: Path, name: str) -> None:
@@ -79,11 +79,8 @@ def rebuild_index(vault_path: Path) -> None:
     Args:
         vault_path: Root directory of the vault.
     """
-    conn = get_db(vault_path)
-    try:
+    with db_connection(vault_path) as conn:
         pages = list_pages(conn)
-    finally:
-        conn.close()
 
     wiki = vault_path / "wiki"
     index_path = wiki / "index.md"

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from .config import GlobalConfig, VaultConfig
 from .db import (
     create_job,
-    get_db,
+    db_connection,
     get_job,
     list_jobs,
     list_pages,
@@ -138,11 +138,8 @@ async def api_status(vault_name: str):
 async def api_reconcile(vault_name: str):
     """Sync the vault database with the current state of wiki markdown files on disk."""
     _, vpath = _get_vault(vault_name)
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         result = reconcile(conn, vpath / "wiki")
-    finally:
-        conn.close()
     return result
 
 
@@ -155,11 +152,8 @@ async def api_reconcile(vault_name: str):
 async def api_list_pages(vault_name: str, category: str | None = Query(None)):
     """List all pages in the vault, optionally filtered to a single category."""
     _, vpath = _get_vault(vault_name)
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         pages = list_pages(conn, category=category)
-    finally:
-        conn.close()
     return {
         "pages": [
             {
@@ -200,11 +194,8 @@ async def api_get_page(vault_name: str, file_path: str = Query(...)):
 async def api_search(vault_name: str, q: str = Query(...), limit: int = Query(10)):
     """Run a BM25 full-text search across the vault and return ranked results."""
     _, vpath = _get_vault(vault_name)
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         results = search(conn, q, limit=limit)
-    finally:
-        conn.close()
     return {
         "results": [
             {
@@ -227,11 +218,8 @@ async def api_search(vault_name: str, q: str = Query(...), limit: int = Query(10
 async def api_graph(vault_name: str):
     """Return nodes and directed edges for the vault's wikilink graph."""
     _, vpath = _get_vault(vault_name)
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         pages = list_pages(conn)
-    finally:
-        conn.close()
 
     path_to_id = {p["file_path"]: i for i, p in enumerate(pages)}
     nodes = [
@@ -277,21 +265,19 @@ def _run_ingest_job(vpath: Path, vname: str, source: str, job_id: str, dry_run: 
         job_id: UUID of the job record to update.
         dry_run: When True, no pages are written to disk.
     """
-    conn = get_db(vpath)
-    try:
-        update_job_status(conn, job_id, "running")
-        result = ingest_source(vpath, source, vname, dry_run=dry_run)
-        update_job_status(
-            conn,
-            job_id,
-            "done",
-            pages_written=result.get("pages_written", []),
-        )
-    except Exception as e:
-        update_job_status(conn, job_id, "failed", error=str(e))
-        log.error("Ingest job %s failed: %s", job_id, e)
-    finally:
-        conn.close()
+    with db_connection(vpath) as conn:
+        try:
+            update_job_status(conn, job_id, "running")
+            result = ingest_source(vpath, source, vname, dry_run=dry_run)
+            update_job_status(
+                conn,
+                job_id,
+                "done",
+                pages_written=result.get("pages_written", []),
+            )
+        except Exception as e:
+            update_job_status(conn, job_id, "failed", error=str(e))
+            log.error("Ingest job %s failed: %s", job_id, e)
 
 
 @app.post("/api/vaults/{vault_name}/ingest", status_code=202)
@@ -307,11 +293,8 @@ def api_ingest(vault_name: str, req: IngestRequest) -> JSONResponse:
     effective_name = vcfg.name or vname
 
     job_id = str(uuid.uuid4())
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         create_job(conn, job_id=job_id, vault=vname, source=req.source)
-    finally:
-        conn.close()
 
     executor = _get_executor(vname) or ThreadPoolExecutor(max_workers=1)
     executor.submit(_run_ingest_job, vpath, effective_name, req.source, job_id, req.dry_run)
@@ -328,11 +311,8 @@ def api_ingest(vault_name: str, req: IngestRequest) -> JSONResponse:
 async def api_get_job(vault_name: str, job_id: str) -> dict[str, Any]:
     """Return the current status of an ingest job."""
     _, vpath = _get_vault(vault_name)
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         job = get_job(conn, job_id)
-    finally:
-        conn.close()
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     return job
@@ -348,19 +328,16 @@ async def api_stream_job(vault_name: str, job_id: str) -> StreamingResponse:
     _, vpath = _get_vault(vault_name)
 
     async def _generator():
-        while True:
-            conn = get_db(vpath)
-            try:
+        with db_connection(vpath) as conn:
+            while True:
                 job = get_job(conn, job_id)
-            finally:
-                conn.close()
-            if job is None:
-                yield "event: error\ndata: job not found\n\n"
-                return
-            yield f"data: {json.dumps(job)}\n\n"
-            if job["status"] in ("done", "failed"):
-                return
-            await asyncio.sleep(1)
+                if job is None:
+                    yield "event: error\ndata: job not found\n\n"
+                    return
+                yield f"data: {json.dumps(job)}\n\n"
+                if job["status"] in ("done", "failed"):
+                    return
+                await asyncio.sleep(1)
 
     return StreamingResponse(_generator(), media_type="text/event-stream")
 
@@ -369,11 +346,8 @@ async def api_stream_job(vault_name: str, job_id: str) -> StreamingResponse:
 async def api_list_jobs(vault_name: str) -> dict[str, Any]:
     """Return the 20 most recent ingest jobs for a vault, newest first."""
     _, vpath = _get_vault(vault_name)
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         jobs = list_jobs(conn)
-    finally:
-        conn.close()
     return {"jobs": jobs}
 
 

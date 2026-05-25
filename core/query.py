@@ -8,7 +8,7 @@ from typing import Any
 import litellm
 
 from .config import resolve_embedding_config, resolve_model
-from .db import get_db, hybrid_search, reconcile
+from .db import db_connection, hybrid_search, reconcile
 from .embeddings import compute_embedding
 
 log = logging.getLogger(__name__)
@@ -56,11 +56,8 @@ def query_wiki(
     saved_to = None
     if save_as:
         saved_to = _save_answer(wiki_root, save_as, question, answer, sources)
-        conn = get_db(vault_path)
-        try:
+        with db_connection(vault_path) as conn:
             reconcile(conn, wiki_root)
-        finally:
-            conn.close()
 
     return {"answer": answer, "sources": sources, "saved_to": saved_to}
 
@@ -88,11 +85,8 @@ def _build_context(vault_path: Path, wiki_root: Path, question: str) -> tuple[st
     except Exception:
         log.warning("Embedding failed for query; falling back to lexical-only search")
 
-    conn = get_db(vault_path)
-    try:
+    with db_connection(vault_path) as conn:
         results = hybrid_search(conn, question, query_embedding, limit=CONTEXT_PAGES)
-    finally:
-        conn.close()
 
     if not results:
         return "(No relevant pages found in wiki.)", []

@@ -434,7 +434,7 @@ def rebuild_index_cmd(vault: str | None):
 @click.option("--vault", "-v", default=None, help="Vault name")
 def reconcile(vault: str | None):
     """Re-sync the search index with wiki files on disk."""
-    from core.db import get_db
+    from core.db import db_connection
     from core.db import reconcile as do_reconcile
 
     config = GlobalConfig.load()
@@ -444,11 +444,8 @@ def reconcile(vault: str | None):
         console.print(f"[red]{e}[/red]")
         raise SystemExit(1) from None
 
-    conn = get_db(vpath)
-    try:
+    with db_connection(vpath) as conn:
         stats = do_reconcile(conn, vpath / "wiki")
-    finally:
-        conn.close()
     console.print(f"[green]✓[/green] Reconciled [bold]{vname}[/bold]: {stats}")
 
 

@@ -25,7 +25,7 @@ from .config import (
     resolve_model,
 )
 from .db import (
-    get_db,
+    db_connection,
     get_page,
     get_pending_queue,
     hybrid_search,
@@ -137,13 +137,10 @@ def ingest_source(
         result = _parse_llm_json(raw_retry)  # let ValueError propagate on second failure
     if not dry_run:
         written = _write_pages(wiki_root, result)
-        conn = get_db(vault_path)
-        try:
+        with db_connection(vault_path) as conn:
             written_paths = [wiki_root / fp for fp in written]
             partial_reconcile(conn, wiki_root, written_paths)
             _store_embeddings(conn, wiki_root, written_paths, vault_path)
-        finally:
-            conn.close()
         _append_log(vault_path, display_name, written)
         rebuild_index(vault_path)
         result["pages_written"] = written
@@ -171,8 +168,7 @@ def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
         A list of result dicts, one per queued file, each containing at minimum
         ``{"file": str, "status": "done"|"failed"}`` plus ingest output or an ``"error"`` key.
     """
-    conn = get_db(vault_path)
-    try:
+    with db_connection(vault_path) as conn:
         pending = get_pending_queue(conn)
         results = []
         for item in pending:
@@ -187,8 +183,6 @@ def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
                 mark_queue_item(conn, fp, "failed", str(e))
                 log.error("Failed to ingest %s: %s", fp, e)
                 results.append({"file": fp, "status": "failed", "error": str(e)})
-    finally:
-        conn.close()
     return results
 
 
@@ -319,11 +313,8 @@ def _fetch_related(vault_path: Path, wiki_root: Path, text: str) -> str:
     except Exception:
         log.debug("Embedding unavailable for related-pages search; using lexical only")
 
-    conn = get_db(vault_path)
-    try:
+    with db_connection(vault_path) as conn:
         results = hybrid_search(conn, fts_query, query_embedding, limit=RELATED_PAGES_LIMIT)
-    finally:
-        conn.close()
 
     if not results:
         return ""

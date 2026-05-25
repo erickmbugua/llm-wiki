@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import sqlite_vec  # pyright: ignore[reportMissingModuleSource]
@@ -34,6 +36,25 @@ def get_db(vault_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     _ensure_schema(conn)
     return conn
+
+
+@contextmanager
+def db_connection(vault_path: Path) -> Iterator[sqlite3.Connection]:
+    """Context manager that opens a vault DB connection and ensures it is closed on exit.
+
+    Prefer this over ``get_db`` + ``try/finally`` to eliminate connection leaks.
+
+    Args:
+        vault_path: Root directory of the vault.
+
+    Yields:
+        An open ``sqlite3.Connection`` with WAL mode, foreign keys, and sqlite-vec loaded.
+    """
+    conn = get_db(vault_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:

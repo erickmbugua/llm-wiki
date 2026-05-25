@@ -119,7 +119,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (246 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (248 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
@@ -348,7 +348,7 @@ llm-wiki/
 │   ├── prompts.py     # _build_ingest_prompt(), _build_ingest_prompt_strict(), _parse_llm_json()
 │   ├── db/            # SQLite persistence layer (split by concern)
 │   │   ├── __init__.py    # Re-exports all public symbols; sub-module map in docstring
-│   │   ├── connection.py  # get_db(), _ensure_schema() — connection lifecycle + schema DDL
+│   │   ├── connection.py  # get_db(), db_connection(), _ensure_schema() — connection lifecycle + schema DDL
 │   │   ├── pages.py       # upsert_page(), delete_page(), get_page(), list_pages(), _infer_category(), _extract_summary()
 │   │   ├── search.py      # search() FTS5, vector_search() KNN, hybrid_search() RRF
 │   │   ├── reconcile.py   # reconcile(), partial_reconcile(), _rebuild_backlinks_full/incremental()

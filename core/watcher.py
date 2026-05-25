@@ -13,7 +13,7 @@ from watchdog.events import (
 )
 from watchdog.observers import Observer
 
-from .db import get_db, queue_raw_file
+from .db import db_connection, queue_raw_file
 
 log = logging.getLogger(__name__)
 
@@ -30,12 +30,8 @@ class _RawFolderHandler(FileSystemEventHandler):
         if p.suffix.lower() in IGNORED_SUFFIXES or p.name.startswith("."):
             return
         log.info("Raw file detected: %s", p.name)
-        conn = get_db(self.vault_path)
-        try:
-            rel = str(p.relative_to(self.vault_path))
-            queue_raw_file(conn, rel)
-        finally:
-            conn.close()
+        with db_connection(self.vault_path) as conn:
+            queue_raw_file(conn, str(p.relative_to(self.vault_path)))
         if self.on_file:
             self.on_file(str(p))
 

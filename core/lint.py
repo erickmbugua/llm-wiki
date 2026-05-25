@@ -12,7 +12,7 @@ import litellm
 
 from .config import resolve_model
 from .constants import WIKI_CATEGORIES
-from .db import get_db, list_pages, reconcile
+from .db import db_connection, list_pages, reconcile
 
 log = logging.getLogger(__name__)
 
@@ -37,12 +37,9 @@ def lint_vault(vault_path: Path) -> dict[str, Any]:
         - ``saved_to``: Relative path of the saved lint report file.
     """
     wiki_root = vault_path / "wiki"
-    conn = get_db(vault_path)
-    try:
+    with db_connection(vault_path) as conn:
         reconcile(conn, wiki_root)
         pages = list_pages(conn)
-    finally:
-        conn.close()
 
     structural = _structural_checks(wiki_root, pages)
     llm_report = _llm_lint(vault_path, wiki_root, pages)

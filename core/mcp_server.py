@@ -38,7 +38,7 @@ from mcp.types import (
 )
 
 from core.config import GlobalConfig
-from core.db import get_db, list_pages, search
+from core.db import db_connection, list_pages, search
 
 
 def build_server(default_vault: str | None = None) -> Server:
@@ -200,11 +200,8 @@ async def _dispatch(name: str, args: dict[str, Any], resolve) -> str:
 
     if name == "search_wiki":
         vname, vpath = resolve(args.get("vault"))
-        conn = get_db(vpath)
-        try:
+        with db_connection(vpath) as conn:
             results = search(conn, args["query"], limit=args.get("limit", 8))
-        finally:
-            conn.close()
         output = [
             {
                 "title": r["title"],
@@ -225,11 +222,8 @@ async def _dispatch(name: str, args: dict[str, Any], resolve) -> str:
 
     if name == "list_pages":
         vname, vpath = resolve(args.get("vault"))
-        conn = get_db(vpath)
-        try:
+        with db_connection(vpath) as conn:
             pages = list_pages(conn, category=args.get("category"))
-        finally:
-            conn.close()
         output = [
             {
                 "title": p["title"],

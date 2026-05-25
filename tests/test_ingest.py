@@ -628,7 +628,7 @@ class TestIngestQueued:
 
     def test_single_db_connection_used(self, tmp_vault):
         """ingest_queued opens exactly one DB connection for the entire queue."""
-        from core.db import get_db, queue_raw_file
+        from core.db import db_connection, get_db, queue_raw_file
         from core.ingest import ingest_queued
 
         conn = get_db(tmp_vault)
@@ -644,11 +644,11 @@ class TestIngestQueued:
         }
         with (
             patch("core.ingest.ingest_source", return_value=success_result),
-            patch("core.ingest.get_db", wraps=get_db) as mock_get_db,
+            patch("core.ingest.db_connection", wraps=db_connection) as mock_db_conn,
         ):
             ingest_queued(tmp_vault, "TestVault")
 
-        mock_get_db.assert_called_once()
+        mock_db_conn.assert_called_once()
 
 
 # ── rebuild_index integration ─────────────────────────────────────────────────

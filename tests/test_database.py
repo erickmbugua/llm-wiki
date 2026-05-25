@@ -8,6 +8,7 @@ import pytest
 
 from core.db import (
     create_job,
+    db_connection,
     delete_page,
     get_db,
     get_job,
@@ -53,6 +54,28 @@ class TestGetDb:
         conn1.close()
         conn2 = get_db(tmp_vault)  # must not raise
         conn2.close()
+
+
+# ── db_connection ─────────────────────────────────────────────────────────────
+
+
+class TestDbConnection:
+    def test_yields_working_connection(self, tmp_vault):
+        with db_connection(tmp_vault) as conn:
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        assert "pages" in tables
+
+    def test_closes_connection_on_exception(self, tmp_vault):
+        with pytest.raises(RuntimeError), db_connection(tmp_vault):
+            raise RuntimeError("deliberate")
+        # connection should be closed; re-opening should succeed
+        with db_connection(tmp_vault) as conn2:
+            assert conn2 is not None
 
 
 # ── _infer_category ───────────────────────────────────────────────────────────
