@@ -44,7 +44,7 @@ def get_db(vault_path: Path) -> sqlite3.Connection:
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create the ``pages``, FTS5 virtual table, triggers, and ``ingest_queue`` if they don't exist.
+    """Create all tables, FTS5 virtual table, triggers, and indexes if they don't exist.
 
     Args:
         conn: Open database connection.
@@ -110,6 +110,14 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             pages_written TEXT DEFAULT '[]',
             error        TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS links (
+            source_path TEXT NOT NULL,
+            target_stem TEXT NOT NULL,
+            PRIMARY KEY (source_path, target_stem)
+        );
+
+        CREATE INDEX IF NOT EXISTS links_target_idx ON links(target_stem);
     """)
     conn.commit()
 
@@ -173,16 +181,26 @@ def upsert_page(
                 "INSERT OR REPLACE INTO page_vectors(rowid, embedding) VALUES (?, ?)",
                 (row["id"], sqlite_vec.serialize_float32(embedding)),  # pyright: ignore[reportAttributeAccessIssue]
             )
+
+    # Sync outgoing wikilinks for this page into the links table
+    outgoing = {m.strip() for m in re.findall(r"\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]", content or "")}
+    conn.execute("DELETE FROM links WHERE source_path = ?", (rel_path,))
+    if outgoing:
+        conn.executemany(
+            "INSERT OR IGNORE INTO links(source_path, target_stem) VALUES (?, ?)",
+            [(rel_path, stem) for stem in outgoing],
+        )
     conn.commit()
 
 
 def delete_page(conn: sqlite3.Connection, rel_path: str) -> None:
-    """Remove a page record from the database.
+    """Remove a page record and its outgoing links from the database.
 
     Args:
         conn: Open database connection.
         rel_path: Page path relative to ``wiki_root`` (e.g. ``"Concepts/Attention.md"``).
     """
+    conn.execute("DELETE FROM links WHERE source_path = ?", (rel_path,))
     conn.execute("DELETE FROM pages WHERE file_path=?", (rel_path,))
     conn.commit()
 
@@ -410,14 +428,14 @@ def reconcile(conn: sqlite3.Connection, wiki_root: Path) -> dict[str, int]:
         delete_page(conn, rel)
         removed += 1
 
-    _rebuild_backlinks(conn)
+    _rebuild_backlinks_full(conn)
     return {"added": added, "updated": updated, "removed": removed}
 
 
 def partial_reconcile(
     conn: sqlite3.Connection, wiki_root: Path, changed_paths: list[Path]
 ) -> dict[str, int]:
-    """Re-index only the given paths and rebuild backlinks once.
+    """Re-index only the given paths and update backlinks for the affected neighbourhood.
 
     Use this after ingest when the exact set of changed files is known.
     For a full sync from disk, use ``reconcile()`` instead.
@@ -445,21 +463,26 @@ def partial_reconcile(
         elif abs(mtime - existing[rel]) > 0.01:
             upsert_page(conn, wiki_root, md_path)
             updated += 1
-    _rebuild_backlinks(conn)
+    _rebuild_backlinks_incremental(
+        conn, [str(p.relative_to(wiki_root)) for p in changed_paths if p.exists()]
+    )
     return {"added": added, "updated": updated, "removed": 0}
 
 
-def _rebuild_backlinks(conn: sqlite3.Connection) -> None:
-    """Rebuild the ``backlinks`` JSON column for every page by scanning all ``[[wikilink]]`` references.
+def _rebuild_backlinks_full(conn: sqlite3.Connection) -> None:
+    """Rewrite the ``backlinks`` JSON column for every page from the ``links`` table.
+
+    Reads outgoing-link edges from the ``links`` table (populated by ``upsert_page``)
+    instead of regex-scanning page content. O(pages) SQL reads with no content parsing.
 
     When two pages share the same stem (e.g. ``Concepts/Python.md`` and
-    ``Entities/Python.md``), the first path in sorted order wins and a WARNING is
+    ``Entities/Python.md``), the alphabetically first path wins and a WARNING is
     logged so the user knows to rename one of the files.
 
     Args:
         conn: Open database connection. All pages are rewritten in a single transaction.
     """
-    rows = conn.execute("SELECT id, file_path, content FROM pages").fetchall()
+    rows = conn.execute("SELECT id, file_path FROM pages").fetchall()
     title_to_path: dict[str, str] = {}
     for r in sorted(rows, key=lambda r: r["file_path"]):
         stem = r["file_path"].rsplit("/", 1)[-1].replace(".md", "")
@@ -474,22 +497,77 @@ def _rebuild_backlinks(conn: sqlite3.Connection) -> None:
             )
         else:
             title_to_path[stem] = r["file_path"]
-    backlink_map: dict[str, list[str]] = {r["file_path"]: [] for r in rows}
 
-    for row in rows:
-        for link in re.findall(r"\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]", row["content"] or ""):
-            target = title_to_path.get(link.strip())
-            if (
-                target
-                and target != row["file_path"]
-                and row["file_path"] not in backlink_map[target]
-            ):
-                backlink_map[target].append(row["file_path"])
+    backlink_map: dict[str, list[str]] = {r["file_path"]: [] for r in rows}
+    link_rows = conn.execute("SELECT source_path, target_stem FROM links").fetchall()
+    for lr in link_rows:
+        target = title_to_path.get(lr["target_stem"])
+        if (
+            target
+            and target != lr["source_path"]
+            and lr["source_path"] not in backlink_map.get(target, [])
+        ):
+            backlink_map.setdefault(target, []).append(lr["source_path"])
 
     for path, backlinks in backlink_map.items():
         conn.execute(
             "UPDATE pages SET backlinks=? WHERE file_path=?",
             (json.dumps(backlinks), path),
+        )
+    conn.commit()
+
+
+def _rebuild_backlinks_incremental(conn: sqlite3.Connection, changed_paths: list[str]) -> None:
+    """Recompute backlinks only for pages whose link neighbourhood changed.
+
+    A page's backlinks can change when one of the changed pages now links to it
+    (new backlink) or used to link to it (removed backlink). Both cases are covered
+    by recomputing backlinks for all targets of the changed pages' outgoing links,
+    plus the changed pages themselves.
+
+    Args:
+        conn: Open database connection.
+        changed_paths: Vault-relative file paths of pages that were just written
+            (e.g. ``["Concepts/Attention.md"]``).
+    """
+    if not changed_paths:
+        return
+
+    # Stems of changed pages — other pages may link to them by stem
+    changed_stems = {p.rsplit("/", 1)[-1].replace(".md", "") for p in changed_paths}
+
+    # Outgoing stems from changed pages — their targets' backlinks may have changed
+    placeholders = ",".join("?" * len(changed_paths))
+    outgoing_rows = conn.execute(
+        f"SELECT target_stem FROM links WHERE source_path IN ({placeholders})",
+        changed_paths,
+    ).fetchall()
+    affected_stems = changed_stems | {r["target_stem"] for r in outgoing_rows}
+
+    # Resolve stems → paths (first alphabetically wins on collision, same as full rebuild)
+    all_pages = conn.execute("SELECT id, file_path FROM pages").fetchall()
+    title_to_path: dict[str, str] = {}
+    for r in sorted(all_pages, key=lambda r: r["file_path"]):
+        stem = r["file_path"].rsplit("/", 1)[-1].replace(".md", "")
+        if stem not in title_to_path:
+            title_to_path[stem] = r["file_path"]
+
+    affected_paths = {title_to_path[s] for s in affected_stems if s in title_to_path}
+    if not affected_paths:
+        return
+
+    # Recompute backlinks only for affected pages
+    link_rows = conn.execute("SELECT source_path, target_stem FROM links").fetchall()
+    for target_path in affected_paths:
+        target_stem = target_path.rsplit("/", 1)[-1].replace(".md", "")
+        backlinks = [
+            lr["source_path"]
+            for lr in link_rows
+            if lr["target_stem"] == target_stem and lr["source_path"] != target_path
+        ]
+        conn.execute(
+            "UPDATE pages SET backlinks=? WHERE file_path=?",
+            (json.dumps(backlinks), target_path),
         )
     conn.commit()
 

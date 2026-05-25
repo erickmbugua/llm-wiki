@@ -119,7 +119,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (241 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (247 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
@@ -218,6 +218,23 @@ if not raw:
     raise ValueError("empty response")
 raw = str(raw)  # narrows Unknown out of the union
 ```
+
+### Incremental backlinks — `links` table
+Backlink data is derived from the `links` table (one row per directed `[[wikilink]]` edge),
+not by scanning `pages.content` at query time. `upsert_page` syncs the links table
+atomically: it deletes all outgoing rows for the page then re-inserts current links.
+`delete_page` purges link rows before removing the page.
+
+`reconcile` calls `_rebuild_backlinks_full` (reads entire `links` table — O(pages) SQL, no
+regex). `partial_reconcile` calls `_rebuild_backlinks_incremental` which recomputes backlinks
+only for the changed pages and their direct link neighbours, keeping per-ingest work
+proportional to the size of the change rather than the vault.
+
+Wikilink collision (two pages with the same stem, e.g. `Concepts/Python.md` and
+`Entities/Python.md`) is detected in `_rebuild_backlinks_full` when building the
+`title_to_path` dict. The alphabetically first path wins; a WARNING is logged. The `links`
+table stores raw `target_stem` values, so renaming one of the colliding pages automatically
+resolves the collision on the next `reconcile` without any data migration.
 
 ### FastAPI endpoint threading — `def` vs `async def`
 `api_ingest`, `api_query`, and `api_lint` in `core/server.py` are declared as plain `def`,

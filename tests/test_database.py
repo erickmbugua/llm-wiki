@@ -9,7 +9,8 @@ import pytest
 from core.database import (
     _extract_summary,
     _infer_category,
-    _rebuild_backlinks,
+    _rebuild_backlinks_full,
+    _rebuild_backlinks_incremental,
     compute_embedding,
     create_job,
     delete_page,
@@ -410,19 +411,130 @@ class TestRebuildBacklinksCollision:
         upsert_page(conn, wiki, wiki / "Entities" / "Python.md")
 
         with caplog.at_level(logging.WARNING, logger="core.database"):
-            _rebuild_backlinks(conn)  # must not raise
+            _rebuild_backlinks_full(conn)  # must not raise
 
         assert any("collision" in msg.lower() or "Python" in msg for msg in caplog.messages)
 
         # Result must be stable — calling again produces identical backlinks
         first = conn.execute("SELECT file_path, backlinks FROM pages ORDER BY file_path").fetchall()
-        _rebuild_backlinks(conn)
+        _rebuild_backlinks_full(conn)
         second = conn.execute(
             "SELECT file_path, backlinks FROM pages ORDER BY file_path"
         ).fetchall()
         assert [(r["file_path"], r["backlinks"]) for r in first] == [
             (r["file_path"], r["backlinks"]) for r in second
         ]
+        conn.close()
+
+
+# ── links table & incremental backlinks ──────────────────────────────────────
+
+
+class TestLinksTable:
+    def test_upsert_page_writes_links(self, tmp_vault, db_conn):
+        """Upserting a page with two wikilinks writes both rows to the links table."""
+        wiki = tmp_vault / "wiki"
+        md = wiki / "Concepts" / "Linker.md"
+        md.write_text("---\ntitle: Linker\ntags: []\n---\nSee [[Alpha]] and [[Beta]].\n")
+        upsert_page(db_conn, wiki, md)
+        rows = db_conn.execute(
+            "SELECT target_stem FROM links WHERE source_path=? ORDER BY target_stem",
+            ("Concepts/Linker.md",),
+        ).fetchall()
+        stems = {r["target_stem"] for r in rows}
+        assert stems == {"Alpha", "Beta"}
+
+    def test_upsert_page_replaces_links_on_update(self, tmp_vault, db_conn):
+        """Updating a page removes stale link rows and keeps only current outgoing links."""
+        wiki = tmp_vault / "wiki"
+        md = wiki / "Concepts" / "Evolving.md"
+        md.write_text("---\ntitle: Evolving\ntags: []\n---\nSee [[Alpha]] and [[Beta]].\n")
+        upsert_page(db_conn, wiki, md)
+        # Remove Beta link
+        md.write_text("---\ntitle: Evolving\ntags: []\n---\nSee [[Alpha]] only.\n")
+        upsert_page(db_conn, wiki, md)
+        rows = db_conn.execute(
+            "SELECT target_stem FROM links WHERE source_path=?",
+            ("Concepts/Evolving.md",),
+        ).fetchall()
+        stems = {r["target_stem"] for r in rows}
+        assert "Beta" not in stems
+        assert "Alpha" in stems
+
+    def test_delete_page_removes_links(self, tmp_vault, db_conn):
+        """Deleting a page removes all of its outgoing link rows from the links table."""
+        wiki = tmp_vault / "wiki"
+        md = wiki / "Concepts" / "ToDel.md"
+        md.write_text("---\ntitle: ToDel\ntags: []\n---\nSee [[Other]].\n")
+        upsert_page(db_conn, wiki, md)
+        rows_before = db_conn.execute(
+            "SELECT * FROM links WHERE source_path=?", ("Concepts/ToDel.md",)
+        ).fetchall()
+        assert len(rows_before) == 1
+        delete_page(db_conn, "Concepts/ToDel.md")
+        rows_after = db_conn.execute(
+            "SELECT * FROM links WHERE source_path=?", ("Concepts/ToDel.md",)
+        ).fetchall()
+        assert len(rows_after) == 0
+
+    def test_rebuild_backlinks_full_correct(self, tmp_vault, db_conn):
+        """Two pages linking to a third page produce two backlinks on that third page."""
+        wiki = tmp_vault / "wiki"
+        (wiki / "Concepts" / "A.md").write_text("---\ntitle: A\ntags: []\n---\nSee [[C]].\n")
+        (wiki / "Concepts" / "B.md").write_text("---\ntitle: B\ntags: []\n---\nAlso [[C]].\n")
+        (wiki / "Concepts" / "C.md").write_text("---\ntitle: C\ntags: []\n---\nTarget page.\n")
+        upsert_page(db_conn, wiki, wiki / "Concepts" / "A.md")
+        upsert_page(db_conn, wiki, wiki / "Concepts" / "B.md")
+        upsert_page(db_conn, wiki, wiki / "Concepts" / "C.md")
+        _rebuild_backlinks_full(db_conn)
+        row = get_page(db_conn, "Concepts/C.md")
+        assert row is not None
+        backlinks = json.loads(row["backlinks"])
+        assert "Concepts/A.md" in backlinks
+        assert "Concepts/B.md" in backlinks
+
+    def test_rebuild_backlinks_incremental_only_affects_neighbourhood(self, tmp_vault, db_conn):
+        """Incremental rebuild updates the changed page's targets; untouched pages stay empty."""
+        wiki = tmp_vault / "wiki"
+        # Five isolated pages with no links
+        for i in range(5):
+            md = wiki / "Concepts" / f"Page{i}.md"
+            md.write_text(f"---\ntitle: Page{i}\ntags: []\n---\nPage {i} content.\n")
+            upsert_page(db_conn, wiki, md)
+
+        # Linker page that points at Page0
+        linker = wiki / "Concepts" / "Linker.md"
+        linker.write_text("---\ntitle: Linker\ntags: []\n---\nSee [[Page0]].\n")
+        upsert_page(db_conn, wiki, linker)
+
+        _rebuild_backlinks_incremental(db_conn, ["Concepts/Linker.md"])
+
+        # Page0 gets the backlink
+        row0 = get_page(db_conn, "Concepts/Page0.md")
+        assert row0 is not None
+        assert "Concepts/Linker.md" in json.loads(row0["backlinks"])
+
+        # Pages 1–4 are untouched — their backlinks column stays at the default '[]'
+        for i in range(1, 5):
+            row = get_page(db_conn, f"Concepts/Page{i}.md")
+            assert row is not None
+            assert json.loads(row["backlinks"]) == []
+
+    def test_backlinks_wikilink_collision_warning(self, tmp_vault, caplog):
+        """_rebuild_backlinks_full logs a WARNING when two pages share the same stem."""
+        import logging
+
+        wiki = tmp_vault / "wiki"
+        conn = get_db(tmp_vault)
+        (wiki / "Concepts" / "Dup.md").write_text("---\ntitle: Dup\ntags: []\n---\nConcept.\n")
+        (wiki / "Entities" / "Dup.md").write_text("---\ntitle: Dup\ntags: []\n---\nEntity.\n")
+        upsert_page(conn, wiki, wiki / "Concepts" / "Dup.md")
+        upsert_page(conn, wiki, wiki / "Entities" / "Dup.md")
+
+        with caplog.at_level(logging.WARNING, logger="core.database"):
+            _rebuild_backlinks_full(conn)
+
+        assert any("collision" in msg.lower() or "Dup" in msg for msg in caplog.messages)
         conn.close()
 
 

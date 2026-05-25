@@ -97,11 +97,14 @@ page_vectors  -- vec0 virtual table; embedding float[768]; rowid = pages.id
 ingest_queue (id, file_path, status, added_at, processed_at, error)
 ingest_jobs (id TEXT PK, vault, source, status, created_at, started_at, finished_at,
              pages_written JSON array, error)
+links (source_path TEXT, target_stem TEXT, PRIMARY KEY (source_path, target_stem))
 ```
 
 `pages_fts` uses **porter ASCII tokenizer** and is kept in sync with `pages` via three triggers (INSERT, UPDATE, DELETE). Do not manually insert into `pages_fts`.
 
 `page_vectors` is a `vec0` virtual table provided by the **sqlite-vec** extension. `get_db` loads the extension on every connection (`sqlite_vec.load(conn)`) before calling `_ensure_schema`. The rowid of `page_vectors` is the same as `pages.id`, joined as `JOIN pages p ON v.rowid = p.id`.
+
+`links` stores one row per directed wikilink edge (`source_path → target_stem`). `upsert_page` syncs it atomically — deletes all outgoing rows for the page then re-inserts current links. `delete_page` purges link rows before removing the page. This table is the source of truth for backlink computation; `_rebuild_backlinks_full` and `_rebuild_backlinks_incremental` read from it instead of scanning page content.
 
 ### Key functions
 
@@ -109,8 +112,9 @@ ingest_jobs (id TEXT PK, vault, source, status, created_at, started_at, finished
 |---|---|
 | `get_db(vault_path)` | Opens (and creates if needed) the SQLite connection with WAL mode enabled; loads sqlite-vec |
 | `upsert_page(conn, wiki_root, md_path, embedding)` | Parses YAML frontmatter, infers category, extracts summary, upserts `pages`; stores embedding in `page_vectors` when provided |
-| `reconcile(conn, wiki_root)` | Diffs filesystem vs DB by comparing `mtime`; adds/updates/removes pages; calls `_rebuild_backlinks` |
-| `_rebuild_backlinks(conn)` | Full re-scan of `[[wikilink]]` patterns across all pages; updates `backlinks` column; logs a WARNING on title stem collisions (alphabetically first path wins) |
+| `reconcile(conn, wiki_root)` | Diffs filesystem vs DB by comparing `mtime`; adds/updates/removes pages; calls `_rebuild_backlinks_full` |
+| `_rebuild_backlinks_full(conn)` | Reads the `links` table (no content scanning) and rewrites the `backlinks` JSON column for every page; logs a WARNING on title stem collisions (alphabetically first path wins) |
+| `_rebuild_backlinks_incremental(conn, changed_paths)` | Recomputes backlinks only for pages in the changed set and their direct link neighbours — O(neighbourhood) instead of O(all pages) |
 | `search(conn, query, limit)` | FTS5 `MATCH` with BM25 ranking (`ORDER BY rank`) |
 | `compute_embedding(text, model)` | Calls `litellm.embedding` and returns a `list[float]`; raises `RuntimeError` if the model is unavailable |
 | `vector_search(conn, query_embedding, limit)` | KNN search over `page_vectors` using vec0 cosine distance; returns empty list when no embeddings exist |
