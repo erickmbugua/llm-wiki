@@ -52,17 +52,22 @@ def register_vault_executor(vault_name: str, executor: ThreadPoolExecutor) -> No
     _vault_executors[vault_name] = executor
 
 
-def _get_executor(vault_name: str) -> ThreadPoolExecutor | None:
-    """Return the registered executor for a vault, or None if not yet registered.
+def _get_executor(vault_name: str) -> ThreadPoolExecutor:
+    """Return the registered executor for a vault, creating a fallback if not yet registered.
+
+    When called outside ``main_server.py`` (tests, direct uvicorn), a single-worker
+    ``ThreadPoolExecutor`` is created and stored on first access so that subsequent
+    calls for the same vault reuse it and it can be properly drained on process exit.
 
     Args:
         vault_name: Registered vault name.
 
     Returns:
-        The executor for this vault, or ``None`` when called outside main_server.py
-        (e.g. in tests or direct uvicorn invocations).
+        The executor for this vault.
     """
-    return _vault_executors.get(vault_name)
+    if vault_name not in _vault_executors:
+        _vault_executors[vault_name] = ThreadPoolExecutor(max_workers=1)
+    return _vault_executors[vault_name]
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +301,7 @@ def api_ingest(vault_name: str, req: IngestRequest) -> JSONResponse:
     with db_connection(vpath) as conn:
         create_job(conn, job_id=job_id, vault=vname, source=req.source)
 
-    executor = _get_executor(vname) or ThreadPoolExecutor(max_workers=1)
+    executor = _get_executor(vname)
     executor.submit(_run_ingest_job, vpath, effective_name, req.source, job_id, req.dry_run)
 
     return JSONResponse({"job_id": job_id, "status": "pending"}, status_code=202)
