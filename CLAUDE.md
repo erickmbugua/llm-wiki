@@ -56,11 +56,17 @@ Once an approach is chosen, produce a step-by-step plan covering:
 ## Code Quality Standards
 
 ### Documentation
-Every public function and class must have a docstring with:
-- One-line description of what it does
-- `Args:` section for non-obvious parameters
-- `Returns:` section describing the return value and shape
-- `Raises:` section for exceptions callers should handle
+Every code change must update all affected documentation in the same commit — not as a follow-up.
+This includes:
+- **`CLAUDE.md`** — update Known Gotchas, Project Structure, Toolchain, or Key Concepts when
+  behaviour, architecture, or test counts change
+- **Folder `README.md` files** — update module maps, API tables, CLI command tables, config field
+  lists, and data-flow descriptions to match the new code
+- **Docstrings** — every public function and class must have a docstring with:
+  - One-line description of what it does
+  - `Args:` section for non-obvious parameters
+  - `Returns:` section describing the return value and shape
+  - `Raises:` section for exceptions callers should handle
 
 Private helpers need at minimum a one-line docstring if their purpose is not immediately obvious
 from the name and signature.
