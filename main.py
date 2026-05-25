@@ -276,15 +276,21 @@ def reconcile(vault: str | None):
 @click.option("--port", "-p", default=None, type=int, help="Port (default: from config, 8000)")
 @click.option("--host", default="127.0.0.1")
 def serve(port: int | None, host: str):
-    """Start the llm-wiki web dashboard and vault watchers."""
-    import subprocess
+    """Start the llm-wiki web dashboard and vault watchers in-process (no subprocess).
+
+    Imports and calls ``main_server.main`` directly so that Ctrl-C cleanly stops
+    both the CLI and the uvicorn/watchdog threads without leaving orphaned processes.
+    """
     import sys
 
-    cmd = [sys.executable, "main_server.py", "--host", host]
+    from main_server import main as _serve
+
+    argv = ["main_server", "--host", host]
     if port:
-        cmd += ["--port", str(port)]
+        argv += ["--port", str(port)]
+    sys.argv = argv
     console.print("Starting llm-wiki server… (Ctrl-C to stop)")
-    subprocess.run(cmd)
+    _serve()
 
 
 if __name__ == "__main__":
