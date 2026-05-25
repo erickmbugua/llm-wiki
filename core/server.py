@@ -22,6 +22,22 @@ HERE = Path(__file__).parent.parent
 app = FastAPI(title="llm-wiki", version="1.0.0")
 app.mount("/static", StaticFiles(directory=str(HERE / "app" / "static")), name="static")
 
+_config_cache: GlobalConfig | None = None
+
+
+def _get_config() -> GlobalConfig:
+    """Return the cached GlobalConfig, loading from disk on first call."""
+    global _config_cache
+    if _config_cache is None:
+        _config_cache = GlobalConfig.load()
+    return _config_cache
+
+
+def _reset_config_cache() -> None:
+    """Invalidate the cached config. Call after any mutation to GlobalConfig on disk."""
+    global _config_cache
+    _config_cache = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,6 +46,8 @@ app.mount("/static", StaticFiles(directory=str(HERE / "app" / "static")), name="
 
 def _get_vault(vault_name: str | None = None):
     """Resolve a vault name to (name, path), raising HTTP 404 if not found.
+
+    Config is cached per-process; call ``_reset_config_cache()`` after any disk mutation.
 
     Args:
         vault_name: Registered vault name. Falls back to the configured default when None.
@@ -40,7 +58,7 @@ def _get_vault(vault_name: str | None = None):
     Raises:
         HTTPException: 404 if the vault name is not registered or no default is set.
     """
-    config = GlobalConfig.load()
+    config = _get_config()
     try:
         vname, vpath = config.resolve_vault(vault_name)
     except (ValueError, KeyError) as e:
@@ -67,7 +85,7 @@ async def root():
 @app.get("/api/vaults")
 async def api_vaults():
     """Return all registered vault names and the current default."""
-    config = GlobalConfig.load()
+    config = _get_config()
     return {
         "vaults": list(config.vaults.keys()),
         "default": config.default_vault,
@@ -78,7 +96,7 @@ async def api_vaults():
 async def api_status(vault_name: str):
     """Return page counts, raw queue size, and the active model for a vault."""
     vname, vpath = _get_vault(vault_name)
-    config = GlobalConfig.load()
+    config = _get_config()
     vcfg = VaultConfig.load(vpath)
     stats = vault_stats(vpath)
     return {

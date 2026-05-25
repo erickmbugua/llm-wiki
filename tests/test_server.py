@@ -1,6 +1,6 @@
 """Tests for core/server.py — FastAPI REST endpoints via TestClient."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,8 +15,12 @@ from core.server import app
 def client(populated_vault, monkeypatch):
     """
     TestClient with GlobalConfig patched to point at populated_vault.
-    All server routes call GlobalConfig.load() internally.
+    All server routes call _get_config() internally, so we reset the cache
+    first to prevent state from leaking between tests.
     """
+    from core.server import _reset_config_cache
+
+    _reset_config_cache()
     cfg = GlobalConfig()
     cfg.vaults = {"TestVault": str(populated_vault)}
     cfg.default_vault = "TestVault"
@@ -27,6 +31,22 @@ def client(populated_vault, monkeypatch):
 @pytest.fixture
 def vault_name():
     return "TestVault"
+
+
+# ── Config cache ──────────────────────────────────────────────────────────────
+
+
+class TestConfigCache:
+    def test_get_config_calls_load_only_once(self):
+        from core.server import _get_config, _reset_config_cache
+
+        _reset_config_cache()
+        mock_cfg = MagicMock(spec=GlobalConfig)
+        with patch("core.server.GlobalConfig.load", return_value=mock_cfg) as mock_load:
+            _get_config()
+            _get_config()
+            mock_load.assert_called_once()
+        _reset_config_cache()
 
 
 # ── /api/vaults ───────────────────────────────────────────────────────────────
