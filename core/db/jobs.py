@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-__all__ = ["create_job", "update_job_status", "get_job", "list_jobs"]
+__all__ = ["create_job", "get_job", "list_jobs", "update_job_status"]
 
 log = logging.getLogger(__name__)
 

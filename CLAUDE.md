@@ -130,9 +130,14 @@ All QA tools run from the project venv: `.venv/bin/<tool>`
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
 | `pytest` | Test suite (248 tests) | `.venv/bin/pytest tests/ -q` |
+| `pre-commit` | Git hook runner (ruff + mypy on commit) | `.venv/bin/pre-commit run --all-files` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
+
+**Active ruff rule sets:** E, W, F, I, UP, B, C4, SIM, RUF, PERF.
+**Active mypy strict flags:** `check_untyped_defs`, `disallow_untyped_defs`, `disallow_incomplete_defs`
+— all function signatures in every file (including tests) must carry full type annotations.
 
 Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and `pyrightconfig.json`.
 

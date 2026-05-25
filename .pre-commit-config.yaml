@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        language: system
+        entry: .venv/bin/ruff check --fix
+        types: [python]
+        pass_filenames: false
+
+      - id: ruff-format
+        name: ruff format
+        language: system
+        entry: .venv/bin/ruff format
+        types: [python]
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy
+        language: system
+        entry: .venv/bin/mypy
+        types: [python]
+        pass_filenames: false

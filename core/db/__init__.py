@@ -16,7 +16,7 @@ from .queue import get_pending_queue, mark_queue_item, queue_raw_file
 from .reconcile import partial_reconcile, reconcile
 from .search import hybrid_search, search, vector_search
 
-__all__ = [
+__all__ = [  # noqa: RUF022 — grouped by sub-module; alphabetical order would obscure the structure
     # connection
     "get_db",
     "db_connection",

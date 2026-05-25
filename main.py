@@ -14,7 +14,7 @@ console = Console()
 
 
 @click.group()
-def cli():
+def cli() -> None:
     """llm-wiki — LLM-powered Obsidian vault manager."""
 
 
@@ -26,7 +26,7 @@ def cli():
 @cli.command()
 @click.argument("path", default=".", type=click.Path())
 @click.option("--name", "-n", default=None, help="Vault name (defaults to folder name)")
-def init(path: str, name: str | None):
+def init(path: str, name: str | None) -> None:
     """Initialize LLM-wiki structure in PATH (default: current directory)."""
     vault_path = Path(path).resolve()
     vault_name = name or vault_path.name
@@ -49,7 +49,7 @@ def init(path: str, name: str | None):
 
 
 @cli.command("list")
-def list_vaults():
+def list_vaults() -> None:
     """List all registered vaults."""
     config = GlobalConfig.load()
     if not config.vaults:
@@ -73,7 +73,7 @@ def list_vaults():
 
 @cli.command()
 @click.option("--vault", "-v", default=None, help="Vault name (uses default if unset)")
-def status(vault: str | None):
+def status(vault: str | None) -> None:
     """Show stats for a vault."""
     config = GlobalConfig.load()
     try:
@@ -93,7 +93,7 @@ def status(vault: str | None):
 
 @cli.command("use")
 @click.argument("vault_name")
-def use(vault_name: str):
+def use(vault_name: str) -> None:
     """Set the default vault."""
     config = GlobalConfig.load()
     if vault_name not in config.vaults:
@@ -106,7 +106,7 @@ def use(vault_name: str):
 
 @cli.command()
 @click.argument("vault_name")
-def unregister(vault_name: str):
+def unregister(vault_name: str) -> None:
     """Remove a vault from the registry (files on disk are left untouched)."""
     config = GlobalConfig.load()
     if vault_name not in config.vaults:
@@ -159,7 +159,7 @@ def _warn_if_unknown_model(model: str) -> None:
 @cli.command("set-model")
 @click.argument("model")
 @click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
-def set_model(model: str, vault: str | None):
+def set_model(model: str, vault: str | None) -> None:
     """Set the LiteLLM model string (e.g. claude-sonnet-4-6, gpt-4o, ollama/llama3).
 
     Prints a yellow warning when the model string does not match any known provider
@@ -188,7 +188,7 @@ def set_model(model: str, vault: str | None):
 @cli.command("set-context")
 @click.argument("chars", type=int)
 @click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
-def set_context(chars: int, vault: str | None):
+def set_context(chars: int, vault: str | None) -> None:
     """Set the max source characters fed to the LLM per ingest.
 
     Recommended values by model tier:
@@ -220,7 +220,7 @@ def set_context(chars: int, vault: str | None):
 @cli.command("set-chunk-size")
 @click.argument("chars", type=int)
 @click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
-def set_chunk_size(chars: int, vault: str | None):
+def set_chunk_size(chars: int, vault: str | None) -> None:
     """Set the characters per chunk for large-document summarization.
 
     Documents larger than chunk_size are split into overlapping chunks,
@@ -255,7 +255,7 @@ def set_chunk_size(chars: int, vault: str | None):
 @cli.command("set-chunk-overlap")
 @click.argument("chars", type=int)
 @click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
-def set_chunk_overlap(chars: int, vault: str | None):
+def set_chunk_overlap(chars: int, vault: str | None) -> None:
     """Set the character overlap between adjacent chunks for large-document summarization.
 
     Overlap preserves context at chunk boundaries. Default is 500 characters.
@@ -284,7 +284,7 @@ def set_chunk_overlap(chars: int, vault: str | None):
 @cli.command("set-embedding-model")
 @click.argument("model")
 @click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
-def set_embedding_model(model: str, vault: str | None):
+def set_embedding_model(model: str, vault: str | None) -> None:
     """Set the embedding model for semantic search (e.g. ollama/nomic-embed-text).
 
     The embedding model must be pulled separately from the ingest model.
@@ -321,7 +321,7 @@ def set_embedding_model(model: str, vault: str | None):
 @click.argument("source")
 @click.option("--vault", "-v", default=None, help="Vault name (uses default if unset)")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without writing")
-def ingest(source: str, vault: str | None, dry_run: bool):
+def ingest(source: str, vault: str | None, dry_run: bool) -> None:
     """Ingest a file or URL into the wiki. May take up to two minutes on a local model."""
     from core.ingest import ingest_source
 
@@ -357,7 +357,7 @@ def ingest(source: str, vault: str | None, dry_run: bool):
 @click.argument("question")
 @click.option("--vault", "-v", default=None, help="Vault name")
 @click.option("--save-as", default=None, help="Save answer as a wiki page at this path")
-def query(question: str, vault: str | None, save_as: str | None):
+def query(question: str, vault: str | None, save_as: str | None) -> None:
     """Ask a question answered from wiki content. May take up to two minutes on a local model."""
     from core.query import query_wiki
 
@@ -385,7 +385,7 @@ def query(question: str, vault: str | None, save_as: str | None):
 
 @cli.command()
 @click.option("--vault", "-v", default=None, help="Vault name")
-def lint(vault: str | None):
+def lint(vault: str | None) -> None:
     """Run a lint pass: orphans, broken links, contradictions. May take up to two minutes."""
     from core.lint import lint_vault
 
@@ -415,7 +415,7 @@ def lint(vault: str | None):
 
 @cli.command("index")
 @click.option("--vault", "-v", default=None, help="Vault name (uses default if unset)")
-def rebuild_index_cmd(vault: str | None):
+def rebuild_index_cmd(vault: str | None) -> None:
     """Rebuild wiki/index.md from the current database state."""
     from core.vault import rebuild_index
 
@@ -432,7 +432,7 @@ def rebuild_index_cmd(vault: str | None):
 
 @cli.command()
 @click.option("--vault", "-v", default=None, help="Vault name")
-def reconcile(vault: str | None):
+def reconcile(vault: str | None) -> None:
     """Re-sync the search index with wiki files on disk."""
     from core.db import db_connection
     from core.db import reconcile as do_reconcile
@@ -452,7 +452,7 @@ def reconcile(vault: str | None):
 @cli.command()
 @click.option("--port", "-p", default=None, type=int, help="Port (default: from config, 8000)")
 @click.option("--host", default="127.0.0.1")
-def serve(port: int | None, host: str):
+def serve(port: int | None, host: str) -> None:
     """Start the llm-wiki web dashboard and vault watchers in-process (no subprocess).
 
     Imports and calls ``main_server.main`` directly so that Ctrl-C cleanly stops

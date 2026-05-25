@@ -1,7 +1,9 @@
 """Tests for core/db/ sub-package — schema, CRUD, FTS5 search, reconcile, backlinks, queue."""
 
 import json
+import sqlite3
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,12 +36,12 @@ from core.embeddings import compute_embedding
 
 
 class TestGetDb:
-    def test_creates_db_file(self, tmp_vault):
+    def test_creates_db_file(self, tmp_vault: Path) -> None:
         conn = get_db(tmp_vault)
         conn.close()
         assert (tmp_vault / ".llm-wiki" / "wiki.db").exists()
 
-    def test_creates_pages_table(self, tmp_vault):
+    def test_creates_pages_table(self, tmp_vault: Path) -> None:
         conn = get_db(tmp_vault)
         tables = {
             r[0]
@@ -49,7 +51,7 @@ class TestGetDb:
         assert "pages" in tables
         assert "ingest_queue" in tables
 
-    def test_idempotent_on_second_call(self, tmp_vault):
+    def test_idempotent_on_second_call(self, tmp_vault: Path) -> None:
         conn1 = get_db(tmp_vault)
         conn1.close()
         conn2 = get_db(tmp_vault)  # must not raise
@@ -60,7 +62,7 @@ class TestGetDb:
 
 
 class TestDbConnection:
-    def test_yields_working_connection(self, tmp_vault):
+    def test_yields_working_connection(self, tmp_vault: Path) -> None:
         with db_connection(tmp_vault) as conn:
             tables = {
                 r[0]
@@ -70,7 +72,7 @@ class TestDbConnection:
             }
         assert "pages" in tables
 
-    def test_closes_connection_on_exception(self, tmp_vault):
+    def test_closes_connection_on_exception(self, tmp_vault: Path) -> None:
         with pytest.raises(RuntimeError), db_connection(tmp_vault):
             raise RuntimeError("deliberate")
         # connection should be closed; re-opening should succeed
@@ -93,7 +95,7 @@ class TestInferCategory:
             ("Unknown/Something.md", "root"),
         ],
     )
-    def test_infers_correctly(self, rel_path, expected):
+    def test_infers_correctly(self, rel_path: str, expected: str) -> None:
         assert _infer_category(rel_path) == expected
 
 
@@ -101,19 +103,19 @@ class TestInferCategory:
 
 
 class TestExtractSummary:
-    def test_returns_first_non_heading_line(self):
+    def test_returns_first_non_heading_line(self) -> None:
         content = "# Heading\n\nThis is the summary.\nSecond line."
         assert _extract_summary(content) == "This is the summary."
 
-    def test_skips_headings_and_table_rows(self):
+    def test_skips_headings_and_table_rows(self) -> None:
         content = "## H2\n| col | col |\n\nActual summary here."
         assert _extract_summary(content) == "Actual summary here."
 
-    def test_returns_empty_for_blank_content(self):
+    def test_returns_empty_for_blank_content(self) -> None:
         assert _extract_summary("") == ""
         assert _extract_summary("# Only heading") == ""
 
-    def test_truncates_to_300_chars(self):
+    def test_truncates_to_300_chars(self) -> None:
         long_line = "x" * 400
         assert len(_extract_summary(long_line)) == 300
 
@@ -122,7 +124,7 @@ class TestExtractSummary:
 
 
 class TestUpsertPage:
-    def test_inserts_new_page(self, tmp_vault, db_conn):
+    def test_inserts_new_page(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Test.md"
         md.write_text("---\ntitle: Test Page\ntags: [foo]\n---\nSummary line.\n")
@@ -134,7 +136,7 @@ class TestUpsertPage:
         assert row["summary"] == "Summary line."
         assert json.loads(row["tags"]) == ["foo"]
 
-    def test_updates_existing_page(self, tmp_vault, db_conn):
+    def test_updates_existing_page(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Evolving.md"
         md.write_text("---\ntitle: V1\n---\nFirst version.\n")
@@ -146,7 +148,9 @@ class TestUpsertPage:
         assert row["title"] == "V2"
         assert row["summary"] == "Second version."
 
-    def test_falls_back_to_stem_for_title(self, tmp_vault, db_conn):
+    def test_falls_back_to_stem_for_title(
+        self, tmp_vault: Path, db_conn: sqlite3.Connection
+    ) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "NoFrontmatter.md"
         md.write_text("Just content, no YAML.\n")
@@ -155,7 +159,9 @@ class TestUpsertPage:
         assert row is not None
         assert row["title"] == "NoFrontmatter"
 
-    def test_falls_back_gracefully_on_invalid_yaml(self, tmp_vault, db_conn):
+    def test_falls_back_gracefully_on_invalid_yaml(
+        self, tmp_vault: Path, db_conn: sqlite3.Connection
+    ) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "BadYaml.md"
         # Unquoted colon in YAML value — common model output error
@@ -167,7 +173,7 @@ class TestUpsertPage:
 
 
 class TestDeletePage:
-    def test_removes_page_record(self, tmp_vault, db_conn):
+    def test_removes_page_record(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Temp.md"
         md.write_text("---\ntitle: Temp\n---\nContent.\n")
@@ -176,7 +182,7 @@ class TestDeletePage:
         delete_page(db_conn, "Concepts/Temp.md")
         assert get_page(db_conn, "Concepts/Temp.md") is None
 
-    def test_delete_nonexistent_does_not_raise(self, db_conn):
+    def test_delete_nonexistent_does_not_raise(self, db_conn: sqlite3.Connection) -> None:
         delete_page(db_conn, "does/not/exist.md")  # must not raise
 
 
@@ -184,7 +190,7 @@ class TestDeletePage:
 
 
 class TestListPages:
-    def test_returns_all_pages(self, populated_vault):
+    def test_returns_all_pages(self, populated_vault: Path) -> None:
         conn = get_db(populated_vault)
         pages = list_pages(conn)
         conn.close()
@@ -192,7 +198,7 @@ class TestListPages:
         assert "Transformers" in titles
         assert "Attention" in titles
 
-    def test_filters_by_category(self, populated_vault):
+    def test_filters_by_category(self, populated_vault: Path) -> None:
         conn = get_db(populated_vault)
         sources = list_pages(conn, category="Sources")
         concepts = list_pages(conn, category="Concepts")
@@ -205,20 +211,20 @@ class TestListPages:
 
 
 class TestSearch:
-    def test_returns_relevant_results(self, populated_vault):
+    def test_returns_relevant_results(self, populated_vault: Path) -> None:
         conn = get_db(populated_vault)
         results = search(conn, "attention mechanism")
         conn.close()
         titles = [r["title"] for r in results]
         assert "Attention" in titles
 
-    def test_returns_empty_for_no_match(self, populated_vault):
+    def test_returns_empty_for_no_match(self, populated_vault: Path) -> None:
         conn = get_db(populated_vault)
         results = search(conn, "xyzzy_nonexistent_term")
         conn.close()
         assert results == []
 
-    def test_respects_limit(self, populated_vault):
+    def test_respects_limit(self, populated_vault: Path) -> None:
         conn = get_db(populated_vault)
         results = search(conn, "the", limit=1)
         conn.close()
@@ -229,14 +235,14 @@ class TestSearch:
 
 
 class TestReconcile:
-    def test_adds_new_files(self, tmp_vault, db_conn):
+    def test_adds_new_files(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         (wiki / "Concepts" / "New.md").write_text("---\ntitle: New\n---\nContent.\n")
         stats = reconcile(db_conn, wiki)
         assert stats["added"] >= 1
         assert get_page(db_conn, "Concepts/New.md") is not None
 
-    def test_removes_deleted_files(self, tmp_vault, db_conn):
+    def test_removes_deleted_files(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Temp.md"
         md.write_text("---\ntitle: Temp\n---\nContent.\n")
@@ -245,7 +251,7 @@ class TestReconcile:
         reconcile(db_conn, wiki)
         assert get_page(db_conn, "Concepts/Temp.md") is None
 
-    def test_updates_modified_files(self, tmp_vault, db_conn):
+    def test_updates_modified_files(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Mutable.md"
         md.write_text("---\ntitle: V1\n---\nOriginal.\n")
@@ -259,7 +265,7 @@ class TestReconcile:
         assert row is not None
         assert row["title"] == "V2"
 
-    def test_idempotent_when_nothing_changes(self, populated_vault):
+    def test_idempotent_when_nothing_changes(self, populated_vault: Path) -> None:
         conn = get_db(populated_vault)
         stats = reconcile(conn, populated_vault / "wiki")
         conn.close()
@@ -272,7 +278,7 @@ class TestReconcile:
 
 
 class TestBacklinks:
-    def test_builds_backlinks_from_wikilinks(self, populated_vault):
+    def test_builds_backlinks_from_wikilinks(self, populated_vault: Path) -> None:
         conn = get_db(populated_vault)
         row = get_page(conn, "Concepts/Attention.md")
         conn.close()
@@ -280,7 +286,7 @@ class TestBacklinks:
         backlinks = json.loads(row["backlinks"])
         assert "Concepts/Transformers.md" in backlinks
 
-    def test_no_self_backlinks(self, tmp_vault, db_conn):
+    def test_no_self_backlinks(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Self.md"
         md.write_text("---\ntitle: Self\n---\nLinks to [[Self]].\n")
@@ -289,7 +295,7 @@ class TestBacklinks:
         assert row is not None
         assert "Concepts/Self.md" not in json.loads(row["backlinks"])
 
-    def test_alias_links_resolved(self, tmp_vault, db_conn):
+    def test_alias_links_resolved(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         wiki = tmp_vault / "wiki"
         (wiki / "Concepts" / "Target.md").write_text("---\ntitle: Target\n---\nTarget page.\n")
         (wiki / "Concepts" / "Linker.md").write_text(
@@ -305,18 +311,18 @@ class TestBacklinks:
 
 
 class TestIngestQueue:
-    def test_queue_raw_file_adds_pending_item(self, db_conn):
+    def test_queue_raw_file_adds_pending_item(self, db_conn: sqlite3.Connection) -> None:
         queue_raw_file(db_conn, "/tmp/source.pdf")
         pending = get_pending_queue(db_conn)
         assert any(p["file_path"] == "/tmp/source.pdf" for p in pending)
 
-    def test_duplicate_file_stays_single_row(self, db_conn):
+    def test_duplicate_file_stays_single_row(self, db_conn: sqlite3.Connection) -> None:
         queue_raw_file(db_conn, "/tmp/dup.pdf")
         queue_raw_file(db_conn, "/tmp/dup.pdf")
         pending = [p for p in get_pending_queue(db_conn) if p["file_path"] == "/tmp/dup.pdf"]
         assert len(pending) == 1
 
-    def test_requeue_failed_file_resets_to_pending(self, db_conn):
+    def test_requeue_failed_file_resets_to_pending(self, db_conn: sqlite3.Connection) -> None:
         queue_raw_file(db_conn, "/tmp/retry.pdf")
         mark_queue_item(db_conn, "/tmp/retry.pdf", "failed", error="timeout")
         # dropping the same file again should reset it so it can be retried
@@ -332,13 +338,13 @@ class TestIngestQueue:
         assert row["error"] is None
         assert row["processed_at"] is None
 
-    def test_mark_queue_item_done(self, db_conn):
+    def test_mark_queue_item_done(self, db_conn: sqlite3.Connection) -> None:
         queue_raw_file(db_conn, "/tmp/done.pdf")
         mark_queue_item(db_conn, "/tmp/done.pdf", "done")
         pending = get_pending_queue(db_conn)
         assert not any(p["file_path"] == "/tmp/done.pdf" for p in pending)
 
-    def test_mark_queue_item_failed_stores_error(self, db_conn):
+    def test_mark_queue_item_failed_stores_error(self, db_conn: sqlite3.Connection) -> None:
         queue_raw_file(db_conn, "/tmp/fail.pdf")
         mark_queue_item(db_conn, "/tmp/fail.pdf", "failed", error="parse error")
         row = db_conn.execute(
@@ -353,7 +359,7 @@ class TestIngestQueue:
 
 
 class TestPartialReconcile:
-    def test_indexes_only_given_files(self, tmp_vault):
+    def test_indexes_only_given_files(self, tmp_vault: Path) -> None:
         """Only the explicitly passed paths are re-indexed; pre-existing others are untouched."""
         wiki = tmp_vault / "wiki"
         conn = get_db(tmp_vault)
@@ -388,7 +394,7 @@ class TestPartialReconcile:
         assert new_mtime == old_mtime
         conn2.close()
 
-    def test_rebuilds_backlinks(self, tmp_vault):
+    def test_rebuilds_backlinks(self, tmp_vault: Path) -> None:
         """Backlinks column is populated for pages referencing each other."""
         wiki = tmp_vault / "wiki"
         conn = get_db(tmp_vault)
@@ -413,7 +419,9 @@ class TestPartialReconcile:
 
 
 class TestRebuildBacklinksCollision:
-    def test_collision_logs_warning_and_is_stable(self, tmp_vault, caplog):
+    def test_collision_logs_warning_and_is_stable(
+        self, tmp_vault: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Two pages with the same stem must not raise; a WARNING must be emitted."""
         import logging
 
@@ -452,7 +460,7 @@ class TestRebuildBacklinksCollision:
 
 
 class TestLinksTable:
-    def test_upsert_page_writes_links(self, tmp_vault, db_conn):
+    def test_upsert_page_writes_links(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         """Upserting a page with two wikilinks writes both rows to the links table."""
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Linker.md"
@@ -465,7 +473,9 @@ class TestLinksTable:
         stems = {r["target_stem"] for r in rows}
         assert stems == {"Alpha", "Beta"}
 
-    def test_upsert_page_replaces_links_on_update(self, tmp_vault, db_conn):
+    def test_upsert_page_replaces_links_on_update(
+        self, tmp_vault: Path, db_conn: sqlite3.Connection
+    ) -> None:
         """Updating a page removes stale link rows and keeps only current outgoing links."""
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "Evolving.md"
@@ -482,7 +492,7 @@ class TestLinksTable:
         assert "Beta" not in stems
         assert "Alpha" in stems
 
-    def test_delete_page_removes_links(self, tmp_vault, db_conn):
+    def test_delete_page_removes_links(self, tmp_vault: Path, db_conn: sqlite3.Connection) -> None:
         """Deleting a page removes all of its outgoing link rows from the links table."""
         wiki = tmp_vault / "wiki"
         md = wiki / "Concepts" / "ToDel.md"
@@ -498,7 +508,9 @@ class TestLinksTable:
         ).fetchall()
         assert len(rows_after) == 0
 
-    def test_rebuild_backlinks_full_correct(self, tmp_vault, db_conn):
+    def test_rebuild_backlinks_full_correct(
+        self, tmp_vault: Path, db_conn: sqlite3.Connection
+    ) -> None:
         """Two pages linking to a third page produce two backlinks on that third page."""
         wiki = tmp_vault / "wiki"
         (wiki / "Concepts" / "A.md").write_text("---\ntitle: A\ntags: []\n---\nSee [[C]].\n")
@@ -514,7 +526,9 @@ class TestLinksTable:
         assert "Concepts/A.md" in backlinks
         assert "Concepts/B.md" in backlinks
 
-    def test_rebuild_backlinks_incremental_only_affects_neighbourhood(self, tmp_vault, db_conn):
+    def test_rebuild_backlinks_incremental_only_affects_neighbourhood(
+        self, tmp_vault: Path, db_conn: sqlite3.Connection
+    ) -> None:
         """Incremental rebuild updates the changed page's targets; untouched pages stay empty."""
         wiki = tmp_vault / "wiki"
         # Five isolated pages with no links
@@ -535,13 +549,15 @@ class TestLinksTable:
         assert row0 is not None
         assert "Concepts/Linker.md" in json.loads(row0["backlinks"])
 
-        # Pages 1–4 are untouched — their backlinks column stays at the default '[]'
+        # Pages 1-4 are untouched — their backlinks column stays at the default '[]'
         for i in range(1, 5):
             row = get_page(db_conn, f"Concepts/Page{i}.md")
             assert row is not None
             assert json.loads(row["backlinks"]) == []
 
-    def test_backlinks_wikilink_collision_warning(self, tmp_vault, caplog):
+    def test_backlinks_wikilink_collision_warning(
+        self, tmp_vault: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """_rebuild_backlinks_full logs a WARNING when two pages share the same stem."""
         import logging
 
@@ -563,7 +579,7 @@ class TestLinksTable:
 
 
 class TestIngestJobs:
-    def test_create_job_and_get_job_round_trip(self, db_conn):
+    def test_create_job_and_get_job_round_trip(self, db_conn: sqlite3.Connection) -> None:
         create_job(db_conn, job_id="job-1", vault="TestVault", source="/raw/doc.pdf")
         job = get_job(db_conn, "job-1")
         assert job is not None
@@ -573,10 +589,10 @@ class TestIngestJobs:
         assert job["status"] == "pending"
         assert job["pages_written"] == []
 
-    def test_get_job_returns_none_for_missing_id(self, db_conn):
+    def test_get_job_returns_none_for_missing_id(self, db_conn: sqlite3.Connection) -> None:
         assert get_job(db_conn, "nonexistent-id") is None
 
-    def test_update_job_status_running_sets_started_at(self, db_conn):
+    def test_update_job_status_running_sets_started_at(self, db_conn: sqlite3.Connection) -> None:
         create_job(db_conn, job_id="job-2", vault="V", source="src")
         update_job_status(db_conn, "job-2", "running")
         job = get_job(db_conn, "job-2")
@@ -585,7 +601,9 @@ class TestIngestJobs:
         assert job["started_at"] is not None
         assert job["finished_at"] is None
 
-    def test_update_job_status_done_sets_finished_at_and_pages(self, db_conn):
+    def test_update_job_status_done_sets_finished_at_and_pages(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
         create_job(db_conn, job_id="job-3", vault="V", source="src")
         update_job_status(db_conn, "job-3", "running")
         update_job_status(db_conn, "job-3", "done", pages_written=["Sources/X.md"])
@@ -595,7 +613,7 @@ class TestIngestJobs:
         assert job["finished_at"] is not None
         assert job["pages_written"] == ["Sources/X.md"]
 
-    def test_update_job_status_failed_stores_error(self, db_conn):
+    def test_update_job_status_failed_stores_error(self, db_conn: sqlite3.Connection) -> None:
         create_job(db_conn, job_id="job-4", vault="V", source="src")
         update_job_status(db_conn, "job-4", "failed", error="LLM timeout")
         job = get_job(db_conn, "job-4")
@@ -603,14 +621,14 @@ class TestIngestJobs:
         assert job["status"] == "failed"
         assert job["error"] == "LLM timeout"
 
-    def test_list_jobs_newest_first(self, db_conn):
+    def test_list_jobs_newest_first(self, db_conn: sqlite3.Connection) -> None:
         create_job(db_conn, job_id="old-job", vault="V", source="old")
         create_job(db_conn, job_id="new-job", vault="V", source="new")
         jobs = list_jobs(db_conn)
         ids = [j["id"] for j in jobs]
         assert ids.index("new-job") < ids.index("old-job")
 
-    def test_list_jobs_respects_limit(self, db_conn):
+    def test_list_jobs_respects_limit(self, db_conn: sqlite3.Connection) -> None:
         for i in range(5):
             create_job(db_conn, job_id=f"job-{i}", vault="V", source=f"src-{i}")
         assert len(list_jobs(db_conn, limit=3)) == 3
@@ -624,7 +642,7 @@ _ONE_VEC = [1.0] + [0.0] * (_DIM - 1)
 
 
 class TestSemanticSearch:
-    def test_compute_embedding_returns_list_of_floats(self):
+    def test_compute_embedding_returns_list_of_floats(self) -> None:
         fake_response = MagicMock()
         fake_response.data = [MagicMock(embedding=[0.1] * _DIM)]
         with patch("core.embeddings.litellm.embedding", return_value=fake_response):
@@ -633,14 +651,14 @@ class TestSemanticSearch:
         assert len(result) == _DIM
         assert all(isinstance(v, float) for v in result)
 
-    def test_compute_embedding_raises_runtime_error_on_failure(self):
+    def test_compute_embedding_raises_runtime_error_on_failure(self) -> None:
         with (
             patch("core.embeddings.litellm.embedding", side_effect=ConnectionError("model down")),
             pytest.raises(RuntimeError, match="Embedding failed"),
         ):
             compute_embedding("hello", model="bad-model")
 
-    def test_upsert_page_stores_embedding(self, tmp_vault):
+    def test_upsert_page_stores_embedding(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         page = wiki / "Concepts" / "Emb.md"
         page.write_text("---\ntitle: Emb\ntags: []\n---\nEmbedding test page.\n")
@@ -655,7 +673,7 @@ class TestSemanticSearch:
         conn.close()
         assert row is not None
 
-    def test_vector_search_returns_matching_page(self, tmp_vault):
+    def test_vector_search_returns_matching_page(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         page = wiki / "Concepts" / "Vec.md"
         page.write_text("---\ntitle: Vec\ntags: []\n---\nVector page.\n")
@@ -669,7 +687,7 @@ class TestSemanticSearch:
         assert len(results) > 0
         assert results[0]["file_path"] == "Concepts/Vec.md"
 
-    def test_vector_search_returns_empty_when_no_embeddings(self, tmp_vault):
+    def test_vector_search_returns_empty_when_no_embeddings(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         page = wiki / "Concepts" / "NoEmb.md"
         page.write_text("---\ntitle: NoEmb\ntags: []\n---\nNo embedding.\n")
@@ -681,7 +699,7 @@ class TestSemanticSearch:
 
         assert results == []
 
-    def test_hybrid_search_fuses_fts_and_vector_results(self, tmp_vault):
+    def test_hybrid_search_fuses_fts_and_vector_results(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         page = wiki / "Concepts" / "Hybrid.md"
         page.write_text("---\ntitle: Hybrid\ntags: []\n---\nquantum physics superposition.\n")
@@ -696,7 +714,7 @@ class TestSemanticSearch:
         paths = [r["file_path"] for r in results]
         assert "Concepts/Hybrid.md" in paths
 
-    def test_hybrid_search_falls_back_to_lexical_when_no_embedding(self, tmp_vault):
+    def test_hybrid_search_falls_back_to_lexical_when_no_embedding(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         page = wiki / "Concepts" / "LexOnly.md"
         page.write_text("---\ntitle: LexOnly\ntags: []\n---\nneutral buoyancy experiment.\n")

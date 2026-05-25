@@ -13,7 +13,7 @@ import yaml
 
 from ..constants import WIKI_CATEGORIES
 
-__all__ = ["upsert_page", "delete_page", "get_page", "list_pages"]
+__all__ = ["delete_page", "get_page", "list_pages", "upsert_page"]
 
 log = logging.getLogger(__name__)
 

@@ -38,7 +38,7 @@ from .extraction import _extract_text
 from .prompts import _build_ingest_prompt, _build_ingest_prompt_strict, _parse_llm_json
 from .vault import rebuild_index
 
-__all__ = ["ingest_source", "ingest_queued"]
+__all__ = ["ingest_queued", "ingest_source"]
 
 log = logging.getLogger(__name__)
 

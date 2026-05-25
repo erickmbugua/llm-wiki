@@ -1,6 +1,7 @@
 """Tests for main.py CLI commands."""
 
 import json
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -9,13 +10,13 @@ from main import cli
 
 
 @pytest.fixture
-def runner():
+def runner() -> CliRunner:
     """Click test runner."""
     return CliRunner()
 
 
 @pytest.fixture
-def two_vault_config(patched_global_config, tmp_path):
+def two_vault_config(patched_global_config: Path, tmp_path: Path) -> Path:
     """Config file with two registered vaults, 'Alpha' as default."""
     alpha = tmp_path / "alpha"
     alpha.mkdir()
@@ -35,14 +36,16 @@ def two_vault_config(patched_global_config, tmp_path):
 
 
 class TestUnregisterCommand:
-    def test_removes_vault_from_config(self, runner, two_vault_config):
+    def test_removes_vault_from_config(self, runner: CliRunner, two_vault_config: Path) -> None:
         result = runner.invoke(cli, ["unregister", "Beta"])
         assert result.exit_code == 0
         saved = json.loads((two_vault_config / "config.json").read_text())
         assert "Beta" not in saved["vaults"]
         assert "Alpha" in saved["vaults"]
 
-    def test_clears_default_when_no_vaults_remain(self, runner, patched_global_config, tmp_path):
+    def test_clears_default_when_no_vaults_remain(
+        self, runner: CliRunner, patched_global_config: Path, tmp_path: Path
+    ) -> None:
         vault = tmp_path / "only"
         vault.mkdir()
         data = {
@@ -57,13 +60,15 @@ class TestUnregisterCommand:
         saved = json.loads((patched_global_config / "config.json").read_text())
         assert saved["default_vault"] is None
 
-    def test_sets_new_default_when_others_remain(self, runner, two_vault_config):
+    def test_sets_new_default_when_others_remain(
+        self, runner: CliRunner, two_vault_config: Path
+    ) -> None:
         result = runner.invoke(cli, ["unregister", "Alpha"])
         assert result.exit_code == 0
         saved = json.loads((two_vault_config / "config.json").read_text())
         assert saved["default_vault"] == "Beta"
 
-    def test_errors_for_unknown_vault(self, runner, two_vault_config):
+    def test_errors_for_unknown_vault(self, runner: CliRunner, two_vault_config: Path) -> None:
         result = runner.invoke(cli, ["unregister", "Nonexistent"])
         assert result.exit_code != 0
 
@@ -72,12 +77,14 @@ class TestUnregisterCommand:
 
 
 class TestSetModelValidation:
-    def test_unknown_prefix_prints_warning(self, runner, patched_global_config):
+    def test_unknown_prefix_prints_warning(
+        self, runner: CliRunner, patched_global_config: Path
+    ) -> None:
         result = runner.invoke(cli, ["set-model", "gpt5"])
         assert result.exit_code == 0
         assert "Warning" in result.output
 
-    def test_known_prefix_no_warning(self, runner, patched_global_config):
+    def test_known_prefix_no_warning(self, runner: CliRunner, patched_global_config: Path) -> None:
         result = runner.invoke(cli, ["set-model", "ollama/llama3"])
         assert result.exit_code == 0
         assert "Warning" not in result.output

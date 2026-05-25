@@ -11,14 +11,14 @@ VAULT_CONFIG_FILE = "config.json"
 VAULT_DB_FILE = "wiki.db"
 
 __all__ = [
+    "VAULT_DB_FILE",
+    "VAULT_INTERNAL_DIR",
     "GlobalConfig",
     "VaultConfig",
-    "VAULT_INTERNAL_DIR",
-    "VAULT_DB_FILE",
-    "resolve_model",
-    "resolve_context_chars",
     "resolve_chunk_config",
+    "resolve_context_chars",
     "resolve_embedding_config",
+    "resolve_model",
 ]
 
 # Process-level config caches — eliminated repeated disk reads during a single operation.

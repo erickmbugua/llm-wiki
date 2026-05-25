@@ -8,7 +8,7 @@ from .config import VAULT_INTERNAL_DIR, VaultConfig
 from .constants import WIKI_CATEGORIES
 from .db import db_connection, list_pages
 
-__all__ = ["init_vault", "vault_stats", "rebuild_index"]
+__all__ = ["init_vault", "rebuild_index", "vault_stats"]
 
 
 def init_vault(vault_path: Path, name: str) -> None:
@@ -197,7 +197,7 @@ Describe the purpose of this vault.
 - Every source gets a page in Sources/ with a one-paragraph summary
 - Extract key concepts and create double-bracket wikilinks to them
 - Flag contradictions with existing pages in a Contradictions section
-- One source typically touches 5–15 wiki pages
+- One source typically touches 5-15 wiki pages
 
 ## Link Conventions
 - Use Obsidian double-bracket syntax for internal links, e.g. the page title in double square brackets

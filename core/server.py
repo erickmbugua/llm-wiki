@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -77,7 +78,7 @@ def _get_executor(vault_name: str) -> ThreadPoolExecutor:
 # ---------------------------------------------------------------------------
 
 
-def _get_vault(vault_name: str | None = None):
+def _get_vault(vault_name: str | None = None) -> tuple[str, Path]:
     """Resolve a vault name to (name, path), raising HTTP 404 if not found.
 
     Config is cached per-process in ``GlobalConfig.load()``; call
@@ -106,7 +107,7 @@ def _get_vault(vault_name: str | None = None):
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root() -> FileResponse:
     """Serve the single-page dashboard HTML."""
     return FileResponse(str(HERE / "app" / "templates" / "index.html"))
 
@@ -117,7 +118,7 @@ async def root():
 
 
 @app.get("/api/vaults")
-async def api_vaults():
+async def api_vaults() -> dict[str, Any]:
     """Return all registered vault names and the current default."""
     config = GlobalConfig.load()
     return {
@@ -127,7 +128,7 @@ async def api_vaults():
 
 
 @app.get("/api/vaults/{vault_name}/status")
-async def api_status(vault_name: str):
+async def api_status(vault_name: str) -> dict[str, Any]:
     """Return page counts, raw queue size, and the active model for a vault."""
     vname, vpath = _get_vault(vault_name)
     config = GlobalConfig.load()
@@ -142,7 +143,7 @@ async def api_status(vault_name: str):
 
 
 @app.post("/api/vaults/{vault_name}/reconcile")
-async def api_reconcile(vault_name: str):
+async def api_reconcile(vault_name: str) -> dict[str, Any]:
     """Sync the vault database with the current state of wiki markdown files on disk."""
     _, vpath = _get_vault(vault_name)
     with db_connection(vpath) as conn:
@@ -156,7 +157,7 @@ async def api_reconcile(vault_name: str):
 
 
 @app.get("/api/vaults/{vault_name}/pages")
-async def api_list_pages(vault_name: str, category: str | None = Query(None)):
+async def api_list_pages(vault_name: str, category: str | None = Query(None)) -> dict[str, Any]:
     """List all pages in the vault, optionally filtered to a single category."""
     _, vpath = _get_vault(vault_name)
     with db_connection(vpath) as conn:
@@ -177,7 +178,7 @@ async def api_list_pages(vault_name: str, category: str | None = Query(None)):
 
 
 @app.get("/api/vaults/{vault_name}/pages/content")
-async def api_get_page(vault_name: str, file_path: str = Query(...)):
+async def api_get_page(vault_name: str, file_path: str = Query(...)) -> dict[str, str]:
     """Return the raw markdown content of a single wiki page by its relative file path.
 
     Raises HTTP 400 if the resolved path escapes the wiki root (path traversal guard).
@@ -198,7 +199,9 @@ async def api_get_page(vault_name: str, file_path: str = Query(...)):
 
 
 @app.get("/api/vaults/{vault_name}/search")
-async def api_search(vault_name: str, q: str = Query(...), limit: int = Query(10)):
+async def api_search(
+    vault_name: str, q: str = Query(...), limit: int = Query(10)
+) -> dict[str, Any]:
     """Run a BM25 full-text search across the vault and return ranked results."""
     _, vpath = _get_vault(vault_name)
     with db_connection(vpath) as conn:
@@ -222,7 +225,7 @@ async def api_search(vault_name: str, q: str = Query(...), limit: int = Query(10
 
 
 @app.get("/api/vaults/{vault_name}/graph")
-async def api_graph(vault_name: str):
+async def api_graph(vault_name: str) -> dict[str, Any]:
     """Return nodes and directed edges for the vault's wikilink graph."""
     _, vpath = _get_vault(vault_name)
     with db_connection(vpath) as conn:
@@ -239,12 +242,14 @@ async def api_graph(vault_name: str):
         }
         for i, p in enumerate(pages)
     ]
-    edges = []
+    edges: list[dict[str, Any]] = []
     for p in pages:
         src = path_to_id[p["file_path"]]
-        for bl in json.loads(p["backlinks"] or "[]"):
-            if bl in path_to_id:
-                edges.append({"source": path_to_id[bl], "target": src})
+        edges.extend(
+            {"source": path_to_id[bl], "target": src}
+            for bl in json.loads(p["backlinks"] or "[]")
+            if bl in path_to_id
+        )
 
     return {"nodes": nodes, "edges": edges}
 
@@ -334,7 +339,7 @@ async def api_stream_job(vault_name: str, job_id: str) -> StreamingResponse:
     """
     _, vpath = _get_vault(vault_name)
 
-    async def _generator():
+    async def _generator() -> AsyncGenerator[str, None]:
         with db_connection(vpath) as conn:
             while True:
                 job = get_job(conn, job_id)
@@ -364,7 +369,7 @@ class QueryRequest(BaseModel):
 
 
 @app.post("/api/vaults/{vault_name}/query")
-def api_query(vault_name: str, req: QueryRequest):
+def api_query(vault_name: str, req: QueryRequest) -> dict[str, Any]:
     """Answer a natural-language question grounded in vault content, optionally saving the result."""
     _, vpath = _get_vault(vault_name)
     try:
@@ -375,7 +380,7 @@ def api_query(vault_name: str, req: QueryRequest):
 
 
 @app.post("/api/vaults/{vault_name}/lint")
-def api_lint(vault_name: str):
+def api_lint(vault_name: str) -> dict[str, Any]:
     """Run a full structural and LLM quality lint pass on the vault."""
     _, vpath = _get_vault(vault_name)
     try:
@@ -391,7 +396,7 @@ def api_lint(vault_name: str):
 
 
 @app.get("/api/vaults/{vault_name}/log")
-async def api_log(vault_name: str):
+async def api_log(vault_name: str) -> dict[str, str]:
     """Return the raw content of wiki/log.md, or an empty string if it does not exist."""
     _, vpath = _get_vault(vault_name)
     log_path = vpath / "wiki" / "log.md"

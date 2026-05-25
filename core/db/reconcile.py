@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .pages import delete_page, upsert_page
 
-__all__ = ["reconcile", "partial_reconcile"]
+__all__ = ["partial_reconcile", "reconcile"]
 
 log = logging.getLogger(__name__)
 

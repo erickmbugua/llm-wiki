@@ -15,7 +15,7 @@ from watchdog.observers import Observer
 
 from .db import db_connection, queue_raw_file
 
-__all__ = ["VaultWatcher", "IGNORED_SUFFIXES"]
+__all__ = ["IGNORED_SUFFIXES", "VaultWatcher"]
 
 log = logging.getLogger(__name__)
 

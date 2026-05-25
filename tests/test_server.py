@@ -1,5 +1,6 @@
 """Tests for core/server.py — FastAPI REST endpoints via TestClient."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,7 +13,7 @@ from core.server import app
 
 
 @pytest.fixture
-def client(populated_vault, monkeypatch):
+def client(populated_vault: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """
     TestClient with GlobalConfig patched to point at populated_vault.
     Clear the config.py cache first so no stale state leaks between tests.
@@ -29,7 +30,7 @@ def client(populated_vault, monkeypatch):
 
 
 @pytest.fixture
-def vault_name():
+def vault_name() -> str:
     return "TestVault"
 
 
@@ -37,7 +38,7 @@ def vault_name():
 
 
 class TestApiVaults:
-    def test_returns_vault_list(self, client, vault_name):
+    def test_returns_vault_list(self, client: TestClient, vault_name: str) -> None:
         r = client.get("/api/vaults")
         assert r.status_code == 200
         data = r.json()
@@ -49,7 +50,7 @@ class TestApiVaults:
 
 
 class TestApiStatus:
-    def test_returns_stats(self, client, vault_name):
+    def test_returns_stats(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/status")
         assert r.status_code == 200
         data = r.json()
@@ -58,7 +59,7 @@ class TestApiStatus:
         assert "raw_queued" in data
         assert "model" in data
 
-    def test_404_for_unknown_vault(self, client):
+    def test_404_for_unknown_vault(self, client: TestClient) -> None:
         r = client.get("/api/vaults/DoesNotExist/status")
         assert r.status_code == 404
 
@@ -67,7 +68,7 @@ class TestApiStatus:
 
 
 class TestApiPages:
-    def test_returns_page_list(self, client, vault_name):
+    def test_returns_page_list(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/pages")
         assert r.status_code == 200
         pages = r.json()["pages"]
@@ -75,13 +76,13 @@ class TestApiPages:
         assert "Transformers" in titles
         assert "Attention" in titles
 
-    def test_filters_by_category(self, client, vault_name):
+    def test_filters_by_category(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/pages?category=Concepts")
         assert r.status_code == 200
         pages = r.json()["pages"]
         assert all(p["category"] == "Concepts" for p in pages)
 
-    def test_pages_have_required_fields(self, client, vault_name):
+    def test_pages_have_required_fields(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/pages")
         page = r.json()["pages"][0]
         for field in ("file_path", "title", "category", "summary", "tags", "backlinks"):
@@ -92,7 +93,7 @@ class TestApiPages:
 
 
 class TestApiPageContent:
-    def test_returns_file_content(self, client, vault_name):
+    def test_returns_file_content(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/pages/content?file_path=Concepts/Transformers.md")
         assert r.status_code == 200
         data = r.json()
@@ -100,11 +101,11 @@ class TestApiPageContent:
         assert "content" in data
         assert "Transformers" in data["content"]
 
-    def test_404_for_missing_page(self, client, vault_name):
+    def test_404_for_missing_page(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/pages/content?file_path=Concepts/Missing.md")
         assert r.status_code == 404
 
-    def test_path_traversal_rejected(self, client, vault_name):
+    def test_path_traversal_rejected(self, client: TestClient, vault_name: str) -> None:
         r = client.get(
             f"/api/vaults/{vault_name}/pages/content?file_path=../../.llm-wiki/config.json"
         )
@@ -115,18 +116,18 @@ class TestApiPageContent:
 
 
 class TestApiSearch:
-    def test_returns_results_for_matching_query(self, client, vault_name):
+    def test_returns_results_for_matching_query(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/search?q=attention")
         assert r.status_code == 200
         results = r.json()["results"]
         assert len(results) > 0
 
-    def test_returns_empty_for_no_match(self, client, vault_name):
+    def test_returns_empty_for_no_match(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/search?q=xyzzy_impossible_term")
         assert r.status_code == 200
         assert r.json()["results"] == []
 
-    def test_respects_limit_param(self, client, vault_name):
+    def test_respects_limit_param(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/search?q=the&limit=1")
         assert len(r.json()["results"]) <= 1
 
@@ -135,20 +136,20 @@ class TestApiSearch:
 
 
 class TestApiGraph:
-    def test_returns_nodes_and_edges(self, client, vault_name):
+    def test_returns_nodes_and_edges(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/graph")
         assert r.status_code == 200
         data = r.json()
         assert "nodes" in data
         assert "edges" in data
 
-    def test_nodes_have_required_fields(self, client, vault_name):
+    def test_nodes_have_required_fields(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/graph")
         node = r.json()["nodes"][0]
         for field in ("id", "title", "file_path", "category", "backlink_count"):
             assert field in node
 
-    def test_edges_reference_valid_node_ids(self, client, vault_name):
+    def test_edges_reference_valid_node_ids(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/graph")
         data = r.json()
         node_ids = {n["id"] for n in data["nodes"]}
@@ -161,12 +162,14 @@ class TestApiGraph:
 
 
 class TestApiLog:
-    def test_returns_log_content(self, client, vault_name):
+    def test_returns_log_content(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/log")
         assert r.status_code == 200
         assert "content" in r.json()
 
-    def test_returns_empty_string_when_no_log(self, client, vault_name, populated_vault):
+    def test_returns_empty_string_when_no_log(
+        self, client: TestClient, vault_name: str, populated_vault: Path
+    ) -> None:
         (populated_vault / "wiki" / "log.md").unlink()
         r = client.get(f"/api/vaults/{vault_name}/log")
         assert r.status_code == 200
@@ -177,7 +180,7 @@ class TestApiLog:
 
 
 class TestApiReconcile:
-    def test_returns_reconcile_stats(self, client, vault_name):
+    def test_returns_reconcile_stats(self, client: TestClient, vault_name: str) -> None:
         r = client.post(f"/api/vaults/{vault_name}/reconcile")
         assert r.status_code == 200
         data = r.json()
@@ -190,7 +193,7 @@ class TestApiReconcile:
 
 
 class TestApiIngest:
-    def test_returns_202_with_job_id(self, client, vault_name):
+    def test_returns_202_with_job_id(self, client: TestClient, vault_name: str) -> None:
         """POST ingest must return HTTP 202 and a job_id immediately."""
         with patch("core.server._run_ingest_job"):
             r = client.post(
@@ -202,7 +205,9 @@ class TestApiIngest:
         assert "job_id" in data
         assert data["status"] == "pending"
 
-    def test_job_record_created_as_pending(self, client, vault_name, populated_vault):
+    def test_job_record_created_as_pending(
+        self, client: TestClient, vault_name: str, populated_vault: Path
+    ) -> None:
         """After POST, the job should exist in the DB with status=pending."""
         with patch("core.server._run_ingest_job"):
             r = client.post(
@@ -214,7 +219,7 @@ class TestApiIngest:
         assert r2.status_code == 200
         assert r2.json()["status"] == "pending"
 
-    def test_dry_run_flag_forwarded_to_worker(self, client, vault_name):
+    def test_dry_run_flag_forwarded_to_worker(self, client: TestClient, vault_name: str) -> None:
         """The dry_run flag should be passed to _run_ingest_job."""
         with patch("core.server._run_ingest_job") as mock_worker:
             client.post(
@@ -233,17 +238,17 @@ class TestApiIngest:
 
 
 class TestApiJobs:
-    def test_get_job_404_for_unknown_id(self, client, vault_name):
+    def test_get_job_404_for_unknown_id(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/jobs/nonexistent-id")
         assert r.status_code == 404
 
-    def test_list_jobs_returns_list(self, client, vault_name):
+    def test_list_jobs_returns_list(self, client: TestClient, vault_name: str) -> None:
         r = client.get(f"/api/vaults/{vault_name}/jobs")
         assert r.status_code == 200
         assert "jobs" in r.json()
         assert isinstance(r.json()["jobs"], list)
 
-    def test_list_jobs_includes_created_job(self, client, vault_name):
+    def test_list_jobs_includes_created_job(self, client: TestClient, vault_name: str) -> None:
         with patch("core.server._run_ingest_job"):
             client.post(
                 f"/api/vaults/{vault_name}/ingest",
@@ -258,7 +263,7 @@ class TestApiJobs:
 
 
 class TestApiQuery:
-    def test_returns_answer(self, client, vault_name):
+    def test_returns_answer(self, client: TestClient, vault_name: str) -> None:
         # server.py does a local import: `from .query import query_wiki`
         with patch(
             "core.server.query_wiki", return_value={"answer": "42", "sources": [], "saved_to": None}
@@ -269,7 +274,7 @@ class TestApiQuery:
         assert r.status_code == 200
         assert r.json()["answer"] == "42"
 
-    def test_passes_save_as_when_provided(self, client, vault_name):
+    def test_passes_save_as_when_provided(self, client: TestClient, vault_name: str) -> None:
         with patch(
             "core.server.query_wiki",
             return_value={"answer": "A", "sources": [], "saved_to": "Concepts/SavedQ.md"},
@@ -284,7 +289,7 @@ class TestApiQuery:
 
 
 class TestApiLint:
-    def test_returns_lint_result(self, client, vault_name):
+    def test_returns_lint_result(self, client: TestClient, vault_name: str) -> None:
         # server.py does a local import: `from .lint import lint_vault`
         with patch(
             "core.server.lint_vault",

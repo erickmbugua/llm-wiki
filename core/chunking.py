@@ -77,7 +77,7 @@ def _summarize_chunks(
         prompt = (
             f'You are summarizing part {i}/{n} of a document called "{filename}" '
             f'for a personal wiki called "{vault_name}".\n\n'
-            "Extract the 5–10 most important facts, claims, or ideas from this section as "
+            "Extract the 5-10 most important facts, claims, or ideas from this section as "
             "concise bullet points. Focus on substance; skip navigation text, footers, "
             "and boilerplate.\n\n"
             f"--- SECTION ---\n{chunk}"

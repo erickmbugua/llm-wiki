@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +46,7 @@ def build_server(default_vault: str | None = None) -> Server:
     server = Server("llm-wiki")
     config = GlobalConfig.load()
 
-    def _resolve(vault_name: str | None):
+    def _resolve(vault_name: str | None) -> tuple[str, Path]:
         vname, vpath = config.resolve_vault(vault_name or default_vault)
         return vname, vpath
 
@@ -193,7 +194,9 @@ def build_server(default_vault: str | None = None) -> Server:
     return server
 
 
-async def _dispatch(name: str, args: dict[str, Any], resolve) -> str:
+async def _dispatch(
+    name: str, args: dict[str, Any], resolve: Callable[[str | None], tuple[str, Path]]
+) -> str:
     if name == "list_vaults":
         cfg = GlobalConfig.load()
         return json.dumps({"vaults": cfg.vaults, "default": cfg.default_vault}, indent=2)
@@ -282,7 +285,7 @@ async def _dispatch(name: str, args: dict[str, Any], resolve) -> str:
     return f"Unknown tool: {name}"
 
 
-async def _run(vault: str | None):
+async def _run(vault: str | None) -> None:
     server = build_server(default_vault=vault)
     async with stdio_server() as (r, w):
         await server.run(r, w, server.create_initialization_options())

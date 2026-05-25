@@ -43,6 +43,7 @@ dev = [
     "types-requests>=2.31",
     "types-beautifulsoup4>=4.12",
     "pypdf>=3.0",
+    "pre-commit>=3.7",
 ]
 
 [tool.pytest.ini_options]
@@ -54,14 +55,16 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes (unused imports, undefined names, etc.)
-    "I",   # isort (import ordering)
-    "UP",  # pyupgrade (modernise syntax for target Python version)
-    "B",   # flake8-bugbear (likely bugs and design issues)
-    "C4",  # flake8-comprehensions (unnecessary list/dict/set calls)
-    "SIM", # flake8-simplify (simplifiable code patterns)
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (unused imports, undefined names, etc.)
+    "I",    # isort (import ordering)
+    "UP",   # pyupgrade (modernise syntax for target Python version)
+    "B",    # flake8-bugbear (likely bugs and design issues)
+    "C4",   # flake8-comprehensions (unnecessary list/dict/set calls)
+    "SIM",  # flake8-simplify (simplifiable code patterns)
+    "RUF",  # ruff-specific rules (__all__ sorting, ambiguous chars, unused unpacked vars)
+    "PERF", # perflint (performance anti-patterns)
 ]
 ignore = [
     "E501",   # line too long — handled by the formatter
@@ -78,6 +81,10 @@ indent-style = "space"
 [tool.mypy]
 python_version = "3.10"
 files = ["core", "main.py", "main_server.py", "tests"]
+# Strict annotation enforcement
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 # Errors on genuine mistakes without being overly strict about missing stubs
 warn_return_any = true
 warn_unused_configs = true

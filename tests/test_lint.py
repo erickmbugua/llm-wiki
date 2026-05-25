@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 from core.db import get_db, list_pages, reconcile
 from core.lint import _save_lint_report, _structural_checks, lint_vault
@@ -19,7 +21,7 @@ def _make_pages(wiki_root: Path, specs: list[tuple[str, str]]) -> None:
         p.write_text(content)
 
 
-def _reconciled_pages(vault_path: Path) -> list[dict]:
+def _reconciled_pages(vault_path: Path) -> list[dict[str, Any]]:
     wiki = vault_path / "wiki"
     conn = get_db(vault_path)
     reconcile(conn, wiki)
@@ -32,7 +34,7 @@ def _reconciled_pages(vault_path: Path) -> list[dict]:
 
 
 class TestStructuralChecks:
-    def test_detects_orphan_page(self, tmp_vault):
+    def test_detects_orphan_page(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         _make_pages(
             wiki,
@@ -44,7 +46,7 @@ class TestStructuralChecks:
         result = _structural_checks(wiki, pages)
         assert "Concepts/Orphan.md" in result["orphans"]
 
-    def test_linked_page_not_orphan(self, populated_vault):
+    def test_linked_page_not_orphan(self, populated_vault: Path) -> None:
         wiki = populated_vault / "wiki"
         pages = _reconciled_pages(populated_vault)
         result = _structural_checks(wiki, pages)
@@ -52,7 +54,7 @@ class TestStructuralChecks:
         assert "Concepts/Transformers.md" not in result["orphans"]
         assert "Concepts/Attention.md" not in result["orphans"]
 
-    def test_detects_broken_wikilinks(self, tmp_vault):
+    def test_detects_broken_wikilinks(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         _make_pages(
             wiki,
@@ -65,14 +67,14 @@ class TestStructuralChecks:
         assert "Concepts/Linker.md" in result["broken_links"]
         assert "DoesNotExist" in result["broken_links"]["Concepts/Linker.md"]
 
-    def test_no_broken_links_for_valid_wikilinks(self, populated_vault):
+    def test_no_broken_links_for_valid_wikilinks(self, populated_vault: Path) -> None:
         wiki = populated_vault / "wiki"
         pages = _reconciled_pages(populated_vault)
         result = _structural_checks(wiki, pages)
         # Transformers → [[Attention]] exists
         assert "Concepts/Transformers.md" not in result["broken_links"]
 
-    def test_detects_missing_summary(self, tmp_vault):
+    def test_detects_missing_summary(self, tmp_vault: Path) -> None:
         wiki = tmp_vault / "wiki"
         _make_pages(
             wiki,
@@ -84,12 +86,12 @@ class TestStructuralChecks:
         result = _structural_checks(wiki, pages)
         assert "Concepts/NoBody.md" in result["missing_summaries"]
 
-    def test_empty_vault_returns_no_issues(self, tmp_vault):
+    def test_empty_vault_returns_no_issues(self, tmp_vault: Path) -> None:
         pages = _reconciled_pages(tmp_vault)
         result = _structural_checks(tmp_vault / "wiki", pages)
         assert result["broken_links"] == {}
 
-    def test_root_category_pages_excluded_from_orphan_check(self, tmp_vault):
+    def test_root_category_pages_excluded_from_orphan_check(self, tmp_vault: Path) -> None:
         # index.md, log.md, schema.md are root-category pages with no links
         pages = _reconciled_pages(tmp_vault)
         result = _structural_checks(tmp_vault / "wiki", pages)
@@ -101,25 +103,30 @@ class TestStructuralChecks:
 
 
 class TestSaveLintReport:
-    def _structural(self, orphans=None, broken=None, missing=None):
+    def _structural(
+        self,
+        orphans: list[str] | None = None,
+        broken: dict[str, list[str]] | None = None,
+        missing: list[str] | None = None,
+    ) -> dict[str, Any]:
         return {
             "orphans": orphans or [],
             "broken_links": broken or {},
             "missing_summaries": missing or [],
         }
 
-    def test_creates_report_file(self, tmp_vault):
+    def test_creates_report_file(self, tmp_vault: Path) -> None:
         path = _save_lint_report(
             tmp_vault, tmp_vault / "wiki", self._structural(), "LLM report text."
         )
         assert (tmp_vault / path).exists()
 
-    def test_report_filename_includes_timestamp(self, tmp_vault):
+    def test_report_filename_includes_timestamp(self, tmp_vault: Path) -> None:
         path = _save_lint_report(tmp_vault, tmp_vault / "wiki", self._structural(), "Report.")
         assert path.startswith("lint-")
         assert path.endswith(".md")
 
-    def test_report_contains_structural_counts(self, tmp_vault):
+    def test_report_contains_structural_counts(self, tmp_vault: Path) -> None:
         structural = self._structural(
             orphans=["Concepts/A.md"],
             broken={"Concepts/B.md": ["Missing"]},
@@ -129,14 +136,14 @@ class TestSaveLintReport:
         assert "Concepts/A.md" in content
         assert "Concepts/B.md" in content
 
-    def test_report_contains_llm_report(self, tmp_vault):
+    def test_report_contains_llm_report(self, tmp_vault: Path) -> None:
         path = _save_lint_report(
             tmp_vault, tmp_vault / "wiki", self._structural(), "Unique LLM finding xyz."
         )
         content = (tmp_vault / path).read_text()
         assert "Unique LLM finding xyz." in content
 
-    def test_appends_entry_to_log(self, tmp_vault):
+    def test_appends_entry_to_log(self, tmp_vault: Path) -> None:
         _save_lint_report(tmp_vault, tmp_vault / "wiki", self._structural(), "Report.")
         log = (tmp_vault / "wiki" / "log.md").read_text()
         assert "Lint pass" in log
@@ -146,7 +153,9 @@ class TestSaveLintReport:
 
 
 class TestLintVault:
-    def test_returns_structural_dict(self, populated_vault, fake_llm_response):
+    def test_returns_structural_dict(
+        self, populated_vault: Path, fake_llm_response: Callable[[str], MagicMock]
+    ) -> None:
         with (
             patch(
                 "core.lint.litellm.completion", return_value=fake_llm_response("No issues found.")
@@ -158,7 +167,9 @@ class TestLintVault:
         assert "broken_links" in result["structural"]
         assert "missing_summaries" in result["structural"]
 
-    def test_returns_llm_report_string(self, populated_vault, fake_llm_response):
+    def test_returns_llm_report_string(
+        self, populated_vault: Path, fake_llm_response: Callable[[str], MagicMock]
+    ) -> None:
         with (
             patch(
                 "core.lint.litellm.completion",
@@ -169,7 +180,9 @@ class TestLintVault:
             result = lint_vault(populated_vault)
         assert result["llm_report"] == "LLM says: all good."
 
-    def test_saves_report_to_vault_root(self, populated_vault, fake_llm_response):
+    def test_saves_report_to_vault_root(
+        self, populated_vault: Path, fake_llm_response: Callable[[str], MagicMock]
+    ) -> None:
         with (
             patch("core.lint.litellm.completion", return_value=fake_llm_response("Report.")),
             patch("core.lint.resolve_model", return_value="claude-sonnet-4-6"),
@@ -177,7 +190,9 @@ class TestLintVault:
             result = lint_vault(populated_vault)
         assert (populated_vault / result["saved_to"]).exists()
 
-    def test_report_in_vault_root_not_wiki(self, populated_vault, fake_llm_response):
+    def test_report_in_vault_root_not_wiki(
+        self, populated_vault: Path, fake_llm_response: Callable[[str], MagicMock]
+    ) -> None:
         with (
             patch("core.lint.litellm.completion", return_value=fake_llm_response("Report.")),
             patch("core.lint.resolve_model", return_value="claude-sonnet-4-6"),
@@ -191,7 +206,7 @@ class TestLintVault:
 
 
 class TestRotateLintReports:
-    def test_rotate_lint_reports_removes_oldest(self, tmp_path):
+    def test_rotate_lint_reports_removes_oldest(self, tmp_path: Path) -> None:
         from core.lint import _rotate_lint_reports
 
         for i in range(12):
@@ -202,7 +217,7 @@ class TestRotateLintReports:
         assert not (tmp_path / "lint-2026-01-01-0000.md").exists()
         assert not (tmp_path / "lint-2026-01-02-0000.md").exists()
 
-    def test_rotate_lint_reports_keeps_all_when_under_limit(self, tmp_path):
+    def test_rotate_lint_reports_keeps_all_when_under_limit(self, tmp_path: Path) -> None:
         from core.lint import _rotate_lint_reports
 
         for i in range(5):

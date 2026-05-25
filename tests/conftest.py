@@ -1,5 +1,8 @@
 """Shared fixtures for all test modules."""
 
+import sqlite3
+from collections.abc import Callable, Generator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,7 +14,7 @@ from core.vault import init_vault
 
 
 @pytest.fixture
-def tmp_vault(tmp_path):
+def tmp_vault(tmp_path: Path) -> Path:
     """A fully initialized vault in a temp directory."""
     vault_path = tmp_path / "test-vault"
     init_vault(vault_path, "TestVault")
@@ -19,7 +22,7 @@ def tmp_vault(tmp_path):
 
 
 @pytest.fixture
-def db_conn(tmp_vault):
+def db_conn(tmp_vault: Path) -> Generator[sqlite3.Connection, None, None]:
     """Open SQLite connection to a temp vault; closes after the test."""
     conn = get_db(tmp_vault)
     yield conn
@@ -27,7 +30,7 @@ def db_conn(tmp_vault):
 
 
 @pytest.fixture
-def populated_vault(tmp_vault):
+def populated_vault(tmp_vault: Path) -> Path:
     """
     Vault with three pre-indexed wiki pages:
       Concepts/Transformers.md  — links to [[Attention]]
@@ -57,7 +60,9 @@ def populated_vault(tmp_vault):
 
 
 @pytest.fixture
-def patched_global_config(tmp_path, monkeypatch):
+def patched_global_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path, None, None]:
     """Redirect GlobalConfig I/O to a temp dir so tests never touch ~/.llm-wiki.
 
     Also clears the process-level config caches before and after each test so that
@@ -80,13 +85,13 @@ def patched_global_config(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def fake_llm_response():
+def fake_llm_response() -> Callable[[str], MagicMock]:
     """
     Factory that builds a mock litellm completion response.
     Usage: fake_llm_response("some text")
     """
 
-    def _make(content: str):
+    def _make(content: str) -> MagicMock:
         mock = MagicMock()
         mock.choices[0].message.content = content
         return mock
