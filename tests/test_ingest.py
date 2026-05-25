@@ -11,11 +11,85 @@ from core.ingest import (
     _append_log,
     _build_ingest_prompt,
     _check_ollama,
+    _chunk_text,
     _extract_text,
     _parse_llm_json,
+    _summarize_chunks,
     _write_pages,
     ingest_source,
 )
+
+# ── _chunk_text ───────────────────────────────────────────────────────────────
+
+
+class TestChunkText:
+    def test_single_chunk_when_text_fits(self):
+        text = "x" * 1000
+        chunks = _chunk_text(text, chunk_size=2000, overlap=100)
+        assert chunks == [text]
+
+    def test_splits_into_multiple_chunks_with_overlap(self):
+        text = "a" * 40_000
+        chunks = _chunk_text(text, chunk_size=20_000, overlap=500)
+        assert len(chunks) >= 2
+        # Every chunk is at most chunk_size chars
+        assert all(len(c) <= 20_000 for c in chunks)
+        # Adjacent chunks overlap — the start of each successive chunk is within
+        # `overlap` chars of the end of the previous chunk's start position
+        assert len(chunks[0]) > 0 and len(chunks[-1]) > 0
+
+    def test_breaks_at_newline_within_last_200_chars(self):
+        # Build text where a newline sits 150 chars before the window end
+        body = "a" * 9_850 + "\n" + "b" * 10_149
+        text = body + "c" * 10_000  # total > chunk_size so chunking kicks in
+        chunks = _chunk_text(text, chunk_size=10_000, overlap=200)
+        # The first chunk should end just after the newline, not mid-sentence
+        assert chunks[0].endswith("\n"), "First chunk should break at newline"
+
+    def test_empty_string_returns_single_empty_chunk(self):
+        assert _chunk_text("", chunk_size=1000, overlap=50) == [""]
+
+    def test_overlap_cannot_exceed_chunk_size(self):
+        # Should not raise even with degenerate overlap value
+        text = "x" * 5000
+        chunks = _chunk_text(text, chunk_size=2000, overlap=3000)
+        assert len(chunks) >= 1
+
+
+# ── _summarize_chunks ─────────────────────────────────────────────────────────
+
+
+class TestSummarizeChunks:
+    def test_calls_model_once_per_chunk(self, fake_llm_response):
+        chunks = ["chunk one", "chunk two", "chunk three"]
+        mock_resp = fake_llm_response("• Key point")
+        with patch("core.ingest.litellm.completion", return_value=mock_resp) as mock_llm:
+            result = _summarize_chunks(
+                chunks, model="claude-sonnet-4-6", vault_name="TestVault", filename="doc.txt"
+            )
+        assert mock_llm.call_count == 3
+        assert "Part 1/3" in result
+        assert "Part 3/3" in result
+
+    def test_returns_empty_string_for_empty_chunk_list(self):
+        result = _summarize_chunks([], model="claude-sonnet-4-6", vault_name="V", filename="f.txt")
+        assert result == ""
+
+    def test_truncates_when_summaries_exceed_context_chars(self, fake_llm_response):
+        # Each chunk summary is 10k chars → 3 chunks = 30k total > 5k context_chars
+        big_summary = "x" * 10_000
+        mock_resp = fake_llm_response(big_summary)
+        with patch("core.ingest.litellm.completion", return_value=mock_resp):
+            result = _summarize_chunks(
+                ["a", "b", "c"],
+                model="claude-sonnet-4-6",
+                vault_name="V",
+                filename="f.txt",
+                context_chars=5_000,
+            )
+        assert len(result) == 5_000
+        assert result.endswith("above covers the first sections only]")
+
 
 # ── _extract_text ─────────────────────────────────────────────────────────────
 
@@ -280,6 +354,50 @@ class TestAppendLog:
 
 
 # ── ingest_source (full flow, LLM mocked) ────────────────────────────────────
+
+
+class TestIngestSourceChunking:
+    def test_large_doc_triggers_chunking(self, tmp_vault, fake_llm_response):
+        """A source larger than chunk_size should call _summarize_chunks before the ingest prompt."""
+        llm_output = json.dumps(
+            {
+                "source_page": {"file_path": "Sources/BigDoc.md", "content": "# Big\nSummary."},
+                "page_updates": [],
+            }
+        )
+        # Write a file bigger than the default chunk_size (20_000)
+        big_file = tmp_vault / "raw" / "big.txt"
+        big_file.write_text("x" * 25_000)
+
+        with (
+            patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
+            patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
+            patch("core.ingest._summarize_chunks", return_value="summarized content") as mock_sc,
+        ):
+            result = ingest_source(tmp_vault, str(big_file), "TestVault")
+
+        mock_sc.assert_called_once()
+        assert result["pages_written"] != []
+
+    def test_small_doc_skips_chunking(self, tmp_vault, fake_llm_response):
+        """A source smaller than chunk_size should not call _summarize_chunks."""
+        llm_output = json.dumps(
+            {
+                "source_page": {"file_path": "Sources/Small.md", "content": "# Small\nContent."},
+                "page_updates": [],
+            }
+        )
+        small_file = tmp_vault / "raw" / "small.txt"
+        small_file.write_text("hello world")
+
+        with (
+            patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
+            patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
+            patch("core.ingest._summarize_chunks") as mock_sc,
+        ):
+            ingest_source(tmp_vault, str(small_file), "TestVault")
+
+        mock_sc.assert_not_called()
 
 
 class TestIngestSource:

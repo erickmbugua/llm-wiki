@@ -217,6 +217,70 @@ def set_context(chars: int, vault: str | None):
         console.print(f"[green]✓[/green] Global context_chars → [bold]{chars}[/bold]")
 
 
+@cli.command("set-chunk-size")
+@click.argument("chars", type=int)
+@click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
+def set_chunk_size(chars: int, vault: str | None):
+    """Set the characters per chunk for large-document summarization.
+
+    Documents larger than chunk_size are split into overlapping chunks,
+    each summarized independently before the final ingest prompt.
+
+    Recommended values by model tier:
+      3B-4B models  : 6000
+      7B models (default): 20000
+      70B+ or cloud : 40000
+    """
+    from core.config import VaultConfig
+
+    config = GlobalConfig.load()
+    if vault:
+        try:
+            _, vpath = config.resolve_vault(vault)
+        except (ValueError, KeyError) as e:
+            console.print(f"[red]{e}[/red]")
+            raise SystemExit(1) from None
+        vcfg = VaultConfig.load(vpath)
+        vcfg.chunk_size = chars
+        vcfg.save(vpath)
+        console.print(
+            f"[green]✓[/green] chunk_size for vault [bold]{vault}[/bold] → [bold]{chars}[/bold]"
+        )
+    else:
+        config.chunk_size = chars
+        config.save()
+        console.print(f"[green]✓[/green] Global chunk_size → [bold]{chars}[/bold]")
+
+
+@cli.command("set-chunk-overlap")
+@click.argument("chars", type=int)
+@click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
+def set_chunk_overlap(chars: int, vault: str | None):
+    """Set the character overlap between adjacent chunks for large-document summarization.
+
+    Overlap preserves context at chunk boundaries. Default is 500 characters.
+    """
+    from core.config import VaultConfig
+
+    config = GlobalConfig.load()
+    if vault:
+        try:
+            _, vpath = config.resolve_vault(vault)
+        except (ValueError, KeyError) as e:
+            console.print(f"[red]{e}[/red]")
+            raise SystemExit(1) from None
+        vcfg = VaultConfig.load(vpath)
+        vcfg.chunk_overlap = chars
+        vcfg.save(vpath)
+        console.print(
+            f"[green]✓[/green] chunk_overlap for vault [bold]{vault}[/bold] → [bold]{chars}[/bold]"
+        )
+    else:
+        config.chunk_overlap = chars
+        config.save()
+        console.print(f"[green]✓[/green] Global chunk_overlap → [bold]{chars}[/bold]")
+
+
 # ---------------------------------------------------------------------------
 # LLM operations
 # ---------------------------------------------------------------------------

@@ -79,6 +79,8 @@ pages (
 )
 pages_fts  -- FTS5 virtual table, content=pages (triggers keep in sync)
 ingest_queue (id, file_path, status, added_at, processed_at, error)
+ingest_jobs (id TEXT PK, vault, source, status, created_at, started_at, finished_at,
+             pages_written JSON array, error)
 ```
 
 `pages_fts` uses **porter ASCII tokenizer** and is kept in sync with `pages` via three triggers (INSERT, UPDATE, DELETE). Do not manually insert into `pages_fts`.
@@ -95,6 +97,10 @@ ingest_queue (id, file_path, status, added_at, processed_at, error)
 | `queue_raw_file(conn, file_path)` | Adds a file to `ingest_queue` with status `pending`; re-queues failed items by resetting their status |
 | `get_pending_queue(conn)` | Returns all pending queue items in insertion order |
 | `mark_queue_item(conn, path, status, error)` | Updates queue item status to `processing`, `done`, or `failed` |
+| `create_job(conn, job_id, vault, source)` | Inserts a new `ingest_jobs` record with status `pending` |
+| `update_job_status(conn, job_id, status, pages_written, error)` | Updates a job's status; sets `started_at` on running, `finished_at` on terminal states |
+| `get_job(conn, job_id)` | Returns a job dict by UUID, or `None` if not found |
+| `list_jobs(conn, limit)` | Returns up to `limit` jobs ordered newest-first |
 
 ### Category inference
 `_infer_category(rel_path)` checks the first path segment: `Sources` → `Sources`, `Concepts` → `Concepts`, `Entities` → `Entities`, anything else → `root`.
@@ -220,7 +226,10 @@ Dashboard HTML served from `app/templates/index.html` at `/`.
 | GET | `/api/vaults/{name}/pages/content` | Full page content (`?file_path=`) |
 | GET | `/api/vaults/{name}/search` | FTS5 search (`?q=&limit=`) |
 | GET | `/api/vaults/{name}/graph` | Nodes + edges for force-directed graph |
-| POST | `/api/vaults/{name}/ingest` | `{source, dry_run}` |
+| POST | `/api/vaults/{name}/ingest` | `{source, dry_run}` → 202 `{job_id, status}` |
+| GET | `/api/vaults/{name}/jobs` | List 20 most recent ingest jobs |
+| GET | `/api/vaults/{name}/jobs/{id}` | Get single job status |
+| GET | `/api/vaults/{name}/jobs/{id}/stream` | SSE stream of job status until terminal |
 | POST | `/api/vaults/{name}/query` | `{question, save_as}` |
 | POST | `/api/vaults/{name}/lint` | Run lint pass |
 | GET | `/api/vaults/{name}/log` | Raw `log.md` content |

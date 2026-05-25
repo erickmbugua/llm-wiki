@@ -18,6 +18,8 @@ class GlobalConfig:
     model: str = "ollama/qwen2.5-coder:7b"
     server_port: int = 8000
     context_chars: int = 24_000
+    chunk_size: int = 20_000
+    chunk_overlap: int = 500
 
     @classmethod
     def load(cls) -> GlobalConfig:
@@ -94,6 +96,8 @@ class VaultConfig:
     name: str = ""
     model: str | None = None  # overrides global when set
     context_chars: int | None = None  # overrides global when set
+    chunk_size: int | None = None  # overrides global when set
+    chunk_overlap: int | None = None  # overrides global when set
 
     @classmethod
     def load(cls, vault_path: Path) -> VaultConfig:
@@ -158,3 +162,27 @@ def resolve_context_chars(vault_path: Path | None = None) -> int:
         if vault_cfg.context_chars is not None:
             return vault_cfg.context_chars
     return global_cfg.context_chars
+
+
+def resolve_chunk_config(vault_path: Path | None = None) -> tuple[int, int]:
+    """Return the effective chunk_size and chunk_overlap using the three-level priority chain.
+
+    Priority: vault-level override > global config > hardcoded defaults (20_000, 500).
+
+    Args:
+        vault_path: Root of the vault. When None, only the global config is checked.
+
+    Returns:
+        A tuple of (chunk_size, chunk_overlap). chunk_size is the maximum characters per
+        chunk; chunk_overlap is the characters of context shared between adjacent chunks.
+    """
+    global_cfg = GlobalConfig.load()
+    chunk_size = global_cfg.chunk_size
+    chunk_overlap = global_cfg.chunk_overlap
+    if vault_path is not None:
+        vault_cfg = VaultConfig.load(vault_path)
+        if vault_cfg.chunk_size is not None:
+            chunk_size = vault_cfg.chunk_size
+        if vault_cfg.chunk_overlap is not None:
+            chunk_overlap = vault_cfg.chunk_overlap
+    return chunk_size, chunk_overlap

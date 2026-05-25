@@ -119,7 +119,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (183 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (204 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
@@ -229,6 +229,27 @@ The default is `24_000` (suitable for 7B models). Override per-vault with `llm-w
 `resolve_context_chars(vault_path)` mirrors `resolve_model` with the same priority chain:
 vault-level `VaultConfig.context_chars` > global `GlobalConfig.context_chars` > 24_000.
 
+### `chunk_size` / `chunk_overlap` — large-document map-reduce
+When a source's extracted text exceeds `chunk_size` characters, `ingest_source` runs a
+map-reduce summarization pass before the main ingest prompt:
+1. `_chunk_text` splits the text into overlapping windows of `chunk_size` chars (default `20_000`)
+   with `chunk_overlap` chars (default `500`) shared between adjacent chunks.
+2. `_summarize_chunks` calls the LLM once per chunk to extract key bullet points.
+3. The concatenated summaries (capped at `context_chars`) feed the final ingest prompt.
+
+Override per-vault with `llm-wiki set-chunk-size` / `llm-wiki set-chunk-overlap`.
+`resolve_chunk_config(vault_path) -> tuple[int, int]` uses the same three-level priority chain.
+
+### `POST /api/vaults/{vault}/ingest` — now returns HTTP 202 (breaking change from 200)
+The ingest endpoint is **non-blocking**. It creates an `ingest_jobs` DB record, submits the
+work to the vault's background executor, and immediately returns `{"job_id": "<uuid>", "status": "pending"}`.
+Poll with `GET /api/vaults/{vault}/jobs/{job_id}` or subscribe to the SSE stream at
+`GET /api/vaults/{vault}/jobs/{job_id}/stream` (emits the full job JSON every second until terminal).
+
+The executor registry (`_vault_executors` in `core/server.py`) is populated by `main_server.py`
+at startup via `register_vault_executor()`. When the server is started without `main_server.py`
+(e.g. direct uvicorn or tests), a one-shot `ThreadPoolExecutor` is created on the fly.
+
 ### Optional dependency type gaps (pypdf)
 Optional imports inside `try/except ImportError` suppress the module-not-found error but
 leave member access as `Unknown`. Suppress usage lines individually:
@@ -245,9 +266,9 @@ pages: list[str] = [p.extract_text() or "" for p in reader.pages]  # pyright: ig
 ```
 llm-wiki/
 ├── core/
-│   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars()
+│   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars(), resolve_chunk_config()
 │   ├── database.py    # SQLite FTS5 engine, CRUD, reconcile, backlinks, queue
-│   ├── ingest.py      # Text extraction, LLM page generation, queue processing
+│   ├── ingest.py      # Text extraction, chunking, LLM page generation, queue processing
 │   ├── lint.py        # Structural checks + LLM contradiction review
 │   ├── mcp_server.py  # MCP stdio server (7 tools for Claude Code / Cursor)
 │   ├── query.py       # FTS5 context retrieval + LLM Q&A
