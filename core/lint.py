@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 CONTRADICTION_SAMPLE = 8  # pages sent to LLM for contradiction check
 CONTRADICTION_CHARS = 1200
+MAX_LINT_REPORTS = 10
 
 
 def lint_vault(vault_path: Path) -> dict[str, Any]:
@@ -188,13 +189,29 @@ def _build_lint_prompt(pages_context: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _rotate_lint_reports(vault_path: Path, keep: int = MAX_LINT_REPORTS) -> None:
+    """Delete the oldest lint-*.md files at vault_path, keeping at most ``keep``.
+
+    Files are sorted lexicographically, which is chronological because the filename
+    embeds a timestamp (lint-YYYY-MM-DD-HHMM.md).
+
+    Args:
+        vault_path: Root directory of the vault.
+        keep: Maximum number of lint reports to retain.
+    """
+    reports = sorted(vault_path.glob("lint-*.md"))
+    for old in reports[:-keep]:
+        old.unlink()
+
+
 def _save_lint_report(
     vault_path: Path, wiki_root: Path, structural: dict[str, Any], llm_report: str
 ) -> str:
     """Write a combined lint report to the vault root and append a summary entry to log.md.
 
     The report file is named ``lint-YYYY-MM-DD-HHMM.md`` and saved at the vault root
-    (not inside wiki/) so it does not appear as a regular wiki page.
+    (not inside wiki/) so it does not appear as a regular wiki page. After writing,
+    old reports are rotated so at most ``MAX_LINT_REPORTS`` files are retained.
 
     Args:
         vault_path: Root directory of the vault.
@@ -254,4 +271,5 @@ def _save_lint_report(
             f"Orphans: {len(structural['orphans'])}, Broken links: {len(structural['broken_links'])}\n"
         )
 
+    _rotate_lint_reports(vault_path)
     return rel_path

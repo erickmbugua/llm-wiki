@@ -187,3 +187,27 @@ class TestLintVault:
             result = lint_vault(populated_vault)
         # Report must be at vault root, not inside wiki/
         assert not result["saved_to"].startswith("wiki/")
+
+
+# ── Lint report rotation ───────────────────────────────────────────────────────
+
+
+class TestRotateLintReports:
+    def test_rotate_lint_reports_removes_oldest(self, tmp_path):
+        from core.lint import _rotate_lint_reports
+
+        for i in range(12):
+            (tmp_path / f"lint-2026-01-{i + 1:02d}-0000.md").write_text("x")
+        _rotate_lint_reports(tmp_path, keep=10)
+        remaining = sorted(tmp_path.glob("lint-*.md"))
+        assert len(remaining) == 10
+        assert not (tmp_path / "lint-2026-01-01-0000.md").exists()
+        assert not (tmp_path / "lint-2026-01-02-0000.md").exists()
+
+    def test_rotate_lint_reports_keeps_all_when_under_limit(self, tmp_path):
+        from core.lint import _rotate_lint_reports
+
+        for i in range(5):
+            (tmp_path / f"lint-2026-01-{i + 1:02d}-0000.md").write_text("x")
+        _rotate_lint_reports(tmp_path, keep=10)
+        assert len(list(tmp_path.glob("lint-*.md"))) == 5
