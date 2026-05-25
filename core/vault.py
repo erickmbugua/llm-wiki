@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import VAULT_INTERNAL_DIR, VaultConfig
+from .database import get_db, list_pages
 
 WIKI_SUBDIRS = ["Sources", "Concepts", "Entities"]
 
@@ -68,6 +69,71 @@ def vault_stats(vault_path: Path) -> dict[str, Any]:
     }
 
 
+def rebuild_index(vault_path: Path) -> None:
+    """Regenerate wiki/index.md from the current database, grouped by category.
+
+    Reads all pages via list_pages, sorts by category then title, and writes a
+    markdown table with page link and summary columns. The file is always fully
+    rewritten — no incremental append. Root-category pages (index, log, schema)
+    are excluded.
+
+    Args:
+        vault_path: Root directory of the vault.
+    """
+    conn = get_db(vault_path)
+    try:
+        pages = list_pages(conn)
+    finally:
+        conn.close()
+
+    wiki = vault_path / "wiki"
+    index_path = wiki / "index.md"
+    now = datetime.now().strftime("%Y-%m-%d")
+
+    lines: list[str] = [
+        "---",
+        "title: Index",
+        "type: index",
+        f"updated: {now}",
+        "---",
+        "",
+        "# Wiki Index",
+        "",
+    ]
+
+    categories: dict[str, list[dict[str, Any]]] = {}
+    for page in pages:
+        cat = page.get("category") or "root"
+        if cat == "root":
+            continue
+        categories.setdefault(cat, []).append(page)
+
+    if not categories:
+        lines.append("*No pages yet. Ingest a source to populate this index.*")
+        lines.append("")
+    else:
+        for cat in sorted(categories):
+            lines.append(f"## {cat}")
+            lines.append("")
+            lines.append("| Page | Summary |")
+            lines.append("|------|---------|")
+            for page in sorted(categories[cat], key=lambda p: p.get("title", "")):
+                fp = page.get("file_path", "")
+                stem = (
+                    fp.replace(".md", "").rsplit("/", 1)[-1]
+                    if fp
+                    else page.get("title", "Untitled")
+                )
+                summary = (page.get("summary") or "").replace("|", "—")[:120]
+                lines.append(f"| [[{stem}]] | {summary} |")
+            lines.append("")
+        total = sum(len(v) for v in categories.values())
+        lines.append(f"*{total} pages · updated {now}*")
+        lines.append("")
+
+    index_path.write_text("\n".join(lines))
+
+
 def _write_if_missing(path: Path, content: str) -> None:
     """Write content to path only when the file does not already exist.
 
@@ -80,7 +146,7 @@ def _write_if_missing(path: Path, content: str) -> None:
 
 
 def _index_template() -> str:
-    """Return the initial content for wiki/index.md with YAML frontmatter and an empty table."""
+    """Return the initial content for wiki/index.md with YAML frontmatter and a placeholder."""
     return f"""\
 ---
 title: Index
@@ -90,8 +156,7 @@ updated: {datetime.now().strftime("%Y-%m-%d")}
 
 # Wiki Index
 
-| Page | Category | Summary |
-|------|----------|---------|
+*No pages yet. Ingest a source to populate this index.*
 """
 
 

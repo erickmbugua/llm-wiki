@@ -119,7 +119,7 @@ All tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (213 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (222 tests) | `.venv/bin/pytest tests/ -q` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
 Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
@@ -327,7 +327,7 @@ llm-wiki/
 │   ├── Sources/       # One page per ingested source
 │   ├── Concepts/      # Abstract ideas, technologies, themes
 │   ├── Entities/      # People, organisations, projects
-│   ├── index.md       # Auto-maintained table of contents
+│   ├── index.md       # Rebuilt after every ingest by rebuild_index() in core/vault.py
 │   ├── log.md         # Append-only activity log
 │   └── schema.md      # Vault purpose and ingestion conventions
 └── .llm-wiki/

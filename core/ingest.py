@@ -29,6 +29,7 @@ from .database import (
     partial_reconcile,
     upsert_page,
 )
+from .vault import rebuild_index
 
 log = logging.getLogger(__name__)
 
@@ -148,6 +149,7 @@ def ingest_source(
         finally:
             conn.close()
         _append_log(vault_path, display_name, written)
+        rebuild_index(vault_path)
         result["pages_written"] = written
     else:
         result["pages_written"] = []

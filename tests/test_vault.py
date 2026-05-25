@@ -1,6 +1,8 @@
-"""Tests for core/vault.py — init_vault, vault_stats."""
+"""Tests for core/vault.py — init_vault, vault_stats, rebuild_index."""
 
-from core.vault import WIKI_SUBDIRS, init_vault, vault_stats
+from unittest.mock import patch
+
+from core.vault import WIKI_SUBDIRS, init_vault, rebuild_index, vault_stats
 
 
 class TestInitVault:
@@ -87,3 +89,135 @@ class TestVaultStats:
         stats = vault_stats(tmp_vault)
         # 3 root pages (index, log, schema) + 1 concept
         assert stats["total_pages"] == 4
+
+
+class TestRebuildIndex:
+    def _pages(self, overrides: list[dict]) -> list[dict]:
+        """Build minimal page dicts with defaults for missing keys."""
+        defaults = {"file_path": "", "title": "Untitled", "category": "Concepts", "summary": ""}
+        return [{**defaults, **p} for p in overrides]
+
+    def test_rebuild_index_empty_vault(self, tmp_vault):
+        rebuild_index(tmp_vault)
+        index = (tmp_vault / "wiki" / "index.md").read_text()
+        assert "No pages yet" in index
+
+    def test_rebuild_index_has_yaml_frontmatter(self, tmp_vault):
+        rebuild_index(tmp_vault)
+        index = (tmp_vault / "wiki" / "index.md").read_text()
+        assert index.startswith("---")
+        assert "title: Index" in index
+
+    def test_rebuild_index_groups_by_category(self, tmp_vault):
+        pages = self._pages(
+            [
+                {
+                    "file_path": "Concepts/Foo.md",
+                    "title": "Foo",
+                    "category": "Concepts",
+                    "summary": "Foo desc",
+                },
+                {
+                    "file_path": "Sources/Bar.md",
+                    "title": "Bar",
+                    "category": "Sources",
+                    "summary": "Bar desc",
+                },
+            ]
+        )
+        with patch("core.vault.list_pages", return_value=pages):
+            rebuild_index(tmp_vault)
+        index = (tmp_vault / "wiki" / "index.md").read_text()
+        assert "## Concepts" in index
+        assert "## Sources" in index
+        assert "[[Foo]]" in index
+        assert "[[Bar]]" in index
+
+    def test_rebuild_index_sorts_by_title(self, tmp_vault):
+        pages = self._pages(
+            [
+                {
+                    "file_path": "Concepts/Zebra.md",
+                    "title": "Zebra",
+                    "category": "Concepts",
+                    "summary": "",
+                },
+                {
+                    "file_path": "Concepts/Apple.md",
+                    "title": "Apple",
+                    "category": "Concepts",
+                    "summary": "",
+                },
+                {
+                    "file_path": "Concepts/Mango.md",
+                    "title": "Mango",
+                    "category": "Concepts",
+                    "summary": "",
+                },
+            ]
+        )
+        with patch("core.vault.list_pages", return_value=pages):
+            rebuild_index(tmp_vault)
+        index = (tmp_vault / "wiki" / "index.md").read_text()
+        apple_pos = index.index("Apple")
+        mango_pos = index.index("Mango")
+        zebra_pos = index.index("Zebra")
+        assert apple_pos < mango_pos < zebra_pos
+
+    def test_rebuild_index_truncates_summary(self, tmp_vault):
+        long_summary = "x" * 200
+        pages = self._pages(
+            [
+                {
+                    "file_path": "Concepts/Foo.md",
+                    "title": "Foo",
+                    "category": "Concepts",
+                    "summary": long_summary,
+                },
+            ]
+        )
+        with patch("core.vault.list_pages", return_value=pages):
+            rebuild_index(tmp_vault)
+        index = (tmp_vault / "wiki" / "index.md").read_text()
+        # The 120-char truncated summary should appear, not the full 200-char one
+        assert "x" * 121 not in index
+        assert "x" * 120 in index
+
+    def test_rebuild_index_escapes_pipe_in_summary(self, tmp_vault):
+        pages = self._pages(
+            [
+                {
+                    "file_path": "Concepts/Foo.md",
+                    "title": "Foo",
+                    "category": "Concepts",
+                    "summary": "A | B",
+                },
+            ]
+        )
+        with patch("core.vault.list_pages", return_value=pages):
+            rebuild_index(tmp_vault)
+        index = (tmp_vault / "wiki" / "index.md").read_text()
+        assert "A — B" in index
+        # A raw "|" inside the summary would split the table cell — verify it was escaped
+        table_line = [line for line in index.splitlines() if "[[Foo]]" in line][0]
+        assert "A | B" not in table_line
+
+    def test_rebuild_index_skips_root_category(self, tmp_vault):
+        pages = self._pages(
+            [
+                {"file_path": "index.md", "title": "Index", "category": "root", "summary": ""},
+                {"file_path": "log.md", "title": "Log", "category": "root", "summary": ""},
+                {
+                    "file_path": "Concepts/Real.md",
+                    "title": "Real",
+                    "category": "Concepts",
+                    "summary": "",
+                },
+            ]
+        )
+        with patch("core.vault.list_pages", return_value=pages):
+            rebuild_index(tmp_vault)
+        index = (tmp_vault / "wiki" / "index.md").read_text()
+        assert "[[Index]]" not in index
+        assert "[[Log]]" not in index
+        assert "[[Real]]" in index

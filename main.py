@@ -413,6 +413,23 @@ def lint(vault: str | None):
     console.print(f"\n[green]✓[/green] Report saved to: {result['saved_to']}")
 
 
+@cli.command("index")
+@click.option("--vault", "-v", default=None, help="Vault name (uses default if unset)")
+def rebuild_index_cmd(vault: str | None):
+    """Rebuild wiki/index.md from the current database state."""
+    from core.vault import rebuild_index
+
+    config = GlobalConfig.load()
+    try:
+        vname, vpath = config.resolve_vault(vault)
+    except (ValueError, KeyError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1) from None
+
+    rebuild_index(vpath)
+    console.print(f"[green]✓[/green] Rebuilt index for vault [bold]{vname}[/bold]")
+
+
 @cli.command()
 @click.option("--vault", "-v", default=None, help="Vault name")
 def reconcile(vault: str | None):

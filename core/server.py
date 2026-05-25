@@ -27,7 +27,7 @@ from .database import (
 from .ingest import ingest_source
 from .lint import lint_vault
 from .query import query_wiki
-from .vault import vault_stats
+from .vault import rebuild_index, vault_stats
 
 log = logging.getLogger(__name__)
 
@@ -430,3 +430,21 @@ async def api_log(vault_name: str):
     _, vpath = _get_vault(vault_name)
     log_path = vpath / "wiki" / "log.md"
     return {"content": log_path.read_text() if log_path.exists() else ""}
+
+
+# ---------------------------------------------------------------------------
+# Index API
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/vaults/{vault_name}/index/rebuild")
+async def api_rebuild_index(vault_name: str) -> dict[str, str]:
+    """Rebuild wiki/index.md from the current database state.
+
+    Reads all non-root pages, groups them by category, and rewrites index.md
+    with a sorted markdown table. Useful after manual page edits or a reconcile
+    without a full ingest.
+    """
+    _, vpath = _get_vault(vault_name)
+    rebuild_index(vpath)
+    return {"status": "ok"}

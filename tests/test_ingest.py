@@ -598,3 +598,48 @@ class TestIngestQueued:
             ingest_queued(tmp_vault, "TestVault")
 
         mock_get_db.assert_called_once()
+
+
+# ── rebuild_index integration ─────────────────────────────────────────────────
+
+
+class TestIngestSourceRebuildIndex:
+    def test_ingest_source_calls_rebuild_index(self, tmp_vault, fake_llm_response):
+        """After a successful ingest, rebuild_index is called once."""
+        llm_output = json.dumps(
+            {
+                "source_page": {"file_path": "Sources/RebuildTest.md", "content": "# R"},
+                "page_updates": [],
+            }
+        )
+        src = tmp_vault / "raw" / "test.txt"
+        src.write_text("content")
+
+        with (
+            patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
+            patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
+            patch("core.ingest.rebuild_index") as mock_rebuild,
+        ):
+            ingest_source(tmp_vault, str(src), "TestVault")
+
+        mock_rebuild.assert_called_once_with(tmp_vault)
+
+    def test_ingest_source_dry_run_does_not_rebuild_index(self, tmp_vault, fake_llm_response):
+        """dry_run=True must not call rebuild_index."""
+        llm_output = json.dumps(
+            {
+                "source_page": {"file_path": "Sources/DryRebuild.md", "content": "# D"},
+                "page_updates": [],
+            }
+        )
+        src = tmp_vault / "raw" / "dry.txt"
+        src.write_text("content")
+
+        with (
+            patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
+            patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
+            patch("core.ingest.rebuild_index") as mock_rebuild,
+        ):
+            ingest_source(tmp_vault, str(src), "TestVault", dry_run=True)
+
+        mock_rebuild.assert_not_called()

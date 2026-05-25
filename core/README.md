@@ -61,7 +61,7 @@ Constants:
 
 ## vault.py
 
-Handles vault initialization and stats. No LLM calls here.
+Handles vault initialization, stats, and index maintenance. No LLM calls here.
 
 **`init_vault(vault_path, name)`**
 Creates the full vault skeleton:
@@ -73,8 +73,11 @@ Creates the full vault skeleton:
 **`vault_stats(vault_path) → dict`**
 Returns `{total_pages, raw_queued, categories: {Sources, Concepts, Entities}}` by scanning the filesystem. Used by the CLI `status` command and the dashboard sidebar.
 
+**`rebuild_index(vault_path)`**
+Reads all non-root pages from the database, groups them by category, sorts alphabetically by title, and fully rewrites `wiki/index.md` with a markdown table per category. Called automatically by `ingest_source` after every successful ingest. Also available via `llm-wiki index` CLI and `POST /api/vaults/{name}/index/rebuild`. Summaries are truncated to 120 characters and pipe characters escaped to prevent broken table rendering.
+
 **Template functions** (`_index_template`, `_log_template`, `_schema_template`)
-Generate the initial content for the three special wiki files. `schema.md` is the most important — it tells the LLM how to behave when ingesting into this vault. Future developers should edit the schema template to shape ingest behavior.
+Generate the initial content for the three special wiki files. `_index_template` now uses a "No pages yet" placeholder rather than an empty table — `rebuild_index` overwrites it on first ingest. `schema.md` is the most important — it tells the LLM how to behave when ingesting into this vault.
 
 ---
 
@@ -160,6 +163,7 @@ The most complex module. Orchestrates: extract → search related → LLM prompt
 6. **Write** pages to `wiki/` (create or merge-append for existing pages)
 7. **Reconcile** DB
 8. **Append** to `log.md`
+9. **Rebuild** `wiki/index.md` via `rebuild_index(vault_path)` (skipped when `dry_run=True`)
 
 ### `ingest_queued(vault_path, vault_name)`
 Processes all `pending` queue items from `ingest_queue`. Sets status to `processing` before calling `ingest_source`, then `done` or `failed`. Used by the watcher callback path.
@@ -187,7 +191,6 @@ The LLM is asked to return:
 ### Extension points
 - Add new extractors in `_extract_text()` by matching on suffix or URL pattern
 - Edit `_build_ingest_prompt()` to change the wiki page format the LLM generates
-- Add a post-processing step in `_write_pages()` to auto-update `index.md`
 
 ---
 
@@ -251,6 +254,7 @@ Dashboard HTML served from `app/templates/index.html` at `/`.
 | POST | `/api/vaults/{name}/query` | `{question, save_as}` |
 | POST | `/api/vaults/{name}/lint` | Run lint pass |
 | GET | `/api/vaults/{name}/log` | Raw `log.md` content |
+| POST | `/api/vaults/{name}/index/rebuild` | Rebuild `wiki/index.md` from DB |
 
 All LLM endpoints (`ingest`, `query`, `lint`) are declared as plain `def` (not `async def`). FastAPI automatically dispatches `def` endpoints to anyio's thread pool, so the event loop stays free while the LLM blocks (30–120 s on a local 7B model). Do **not** change them to `async def`.
 
