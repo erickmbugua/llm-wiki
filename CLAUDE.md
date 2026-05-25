@@ -342,6 +342,9 @@ llm-wiki/
 ├── core/
 │   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars(), resolve_chunk_config(), resolve_embedding_config()
 │   ├── embeddings.py  # compute_embedding() — litellm embedding call, returns list[float]
+│   ├── extraction.py  # _extract_text(), _fetch_url(), _extract_pdf(), _extract_docx(), SOURCE_CHAR_LIMIT
+│   ├── chunking.py    # _chunk_text(), _summarize_chunks() — map-reduce for large docs
+│   ├── prompts.py     # _build_ingest_prompt(), _build_ingest_prompt_strict(), _parse_llm_json()
 │   ├── db/            # SQLite persistence layer (split by concern)
 │   │   ├── __init__.py    # Re-exports all public symbols; sub-module map in docstring
 │   │   ├── connection.py  # get_db(), _ensure_schema() — connection lifecycle + schema DDL
@@ -350,7 +353,7 @@ llm-wiki/
 │   │   ├── reconcile.py   # reconcile(), partial_reconcile(), _rebuild_backlinks_full/incremental()
 │   │   ├── queue.py       # queue_raw_file(), get_pending_queue(), mark_queue_item()
 │   │   └── jobs.py        # create_job(), update_job_status(), get_job(), list_jobs()
-│   ├── ingest.py      # Text extraction, chunking, LLM page generation, embedding storage, queue processing
+│   ├── ingest.py      # Orchestration only: extract → related search → LLM call → parse → write → reconcile → log
 │   ├── lint.py        # Structural checks + LLM contradiction review
 │   ├── mcp_server.py  # MCP stdio server (7 tools for Claude Code / Cursor)
 │   ├── query.py       # FTS5 context retrieval + LLM Q&A

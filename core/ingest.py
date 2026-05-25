@@ -1,19 +1,23 @@
+"""Ingest orchestration: extract → related search → LLM prompt → parse → write → reconcile → log.
+
+This module is the entry point for all ingest operations. Text extraction, chunking,
+and prompt assembly live in the focused sub-modules imported below.
+"""
+
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 import sqlite3
-import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import litellm
 import requests
-from bs4 import BeautifulSoup
 
+from .chunking import _chunk_text, _summarize_chunks
 from .config import (
     resolve_chunk_config,
     resolve_context_chars,
@@ -30,6 +34,8 @@ from .db import (
     upsert_page,
 )
 from .embeddings import compute_embedding
+from .extraction import _extract_text
+from .prompts import _build_ingest_prompt, _build_ingest_prompt_strict, _parse_llm_json
 from .vault import rebuild_index
 
 log = logging.getLogger(__name__)
@@ -38,29 +44,7 @@ log = logging.getLogger(__name__)
 # Avoids a redundant GET /api/tags on every item in a batched ingest queue.
 _ollama_verified: set[str] = set()
 
-# Maximum characters fed to the LLM per source
-SOURCE_CHAR_LIMIT = 24_000
 RELATED_PAGES_LIMIT = 5
-
-_BINARY_SUFFIXES = frozenset(
-    {
-        ".xlsx",
-        ".xls",
-        ".pptx",
-        ".ppt",
-        ".doc",
-        ".zip",
-        ".tar",
-        ".gz",
-        ".mp3",
-        ".mp4",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".webp",
-    }
-)
 
 
 # ---------------------------------------------------------------------------
@@ -209,99 +193,6 @@ def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Chunking
-# ---------------------------------------------------------------------------
-
-
-def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
-    """Split text into overlapping chunks of at most chunk_size characters.
-
-    Args:
-        text: Full source text to split.
-        chunk_size: Maximum characters per chunk.
-        overlap: Characters of context shared between consecutive chunks.
-
-    Returns:
-        List of text chunks. Returns ``[text]`` unchanged when ``len(text) <= chunk_size``.
-    """
-    if len(text) <= chunk_size:
-        return [text]
-
-    step = max(1, chunk_size - overlap)
-    starts = list(range(0, len(text), step))
-    chunks: list[str] = []
-
-    for i, start in enumerate(starts):
-        end = min(start + chunk_size, len(text))
-        chunk = text[start:end]
-
-        # For non-final chunks, break at the nearest newline in the last 200 chars
-        # to avoid splitting mid-sentence.
-        if i < len(starts) - 1 and end < len(text):
-            newline_pos = chunk.rfind("\n", max(0, chunk_size - 200))
-            if newline_pos > 0:
-                chunk = chunk[: newline_pos + 1]
-
-        chunks.append(chunk)
-
-    return chunks
-
-
-def _summarize_chunks(
-    chunks: list[str],
-    model: str,
-    vault_name: str,
-    filename: str,
-    context_chars: int = 24_000,
-) -> str:
-    """Call the LLM once per chunk to extract key points, then concatenate.
-
-    Args:
-        chunks: List of text chunks from ``_chunk_text``.
-        model: litellm model string to use for summarization.
-        vault_name: Passed to the prompt for context.
-        filename: Display name of the source document.
-        context_chars: If the concatenated summaries exceed this many characters,
-            truncate with a trailing note.
-
-    Returns:
-        A single string of bullet-point summaries from all chunks. Truncated to
-        ``context_chars`` characters when the combined output is too large.
-    """
-    n = len(chunks)
-    summaries: list[str] = []
-    for i, chunk in enumerate(chunks, start=1):
-        prompt = (
-            f'You are summarizing part {i}/{n} of a document called "{filename}" '
-            f'for a personal wiki called "{vault_name}".\n\n'
-            "Extract the 5–10 most important facts, claims, or ideas from this section as "
-            "concise bullet points. Focus on substance; skip navigation text, footers, "
-            "and boilerplate.\n\n"
-            f"--- SECTION ---\n{chunk}"
-        )
-        log.info("Summarizing chunk %d/%d for '%s'", i, n, filename)
-        response = litellm.completion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        bullet = response.choices[0].message.content  # pyright: ignore[reportAttributeAccessIssue]
-        if not bullet:
-            continue
-        bullet = str(bullet)
-        summaries.append(f"### Part {i}/{n}\n{bullet.strip()}")
-
-    summaries_text = "\n\n".join(summaries)
-    if len(summaries_text) > context_chars:
-        note = (
-            "\n\n[Note: document was too large to fully summarize; "
-            "above covers the first sections only]"
-        )
-        summaries_text = summaries_text[: context_chars - len(note)] + note
-    return summaries_text
-
-
-# ---------------------------------------------------------------------------
 # Embedding helpers
 # ---------------------------------------------------------------------------
 
@@ -382,129 +273,6 @@ def _check_ollama(model: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Text extraction
-# ---------------------------------------------------------------------------
-
-
-def _extract_text(source: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
-    """Dispatch text extraction to the appropriate handler based on the source string.
-
-    Supported formats: .txt, .md, .pdf, .docx, and HTTP/HTTPS URLs.
-    Known binary formats (.xlsx, .xls, .pptx, .ppt, .doc, images, archives, media)
-    raise ValueError immediately rather than feeding garbled bytes to the LLM.
-    Unknown text-like formats fall back to plain-text reading.
-
-    Args:
-        source: A file path or HTTP/HTTPS URL.
-        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
-
-    Returns:
-        A tuple of (extracted_text, display_name). Text is capped at ``char_limit``
-        characters. Returns ``("", source)`` when extraction is not possible.
-
-    Raises:
-        ValueError: The file extension is a known unsupported binary format.
-    """
-    if source.startswith("http://") or source.startswith("https://"):
-        return _fetch_url(source, char_limit=char_limit)
-
-    p = Path(source)
-    if not p.exists():
-        return "", source
-
-    suffix = p.suffix.lower()
-    if suffix in (".txt", ".md"):
-        return p.read_text(errors="replace")[:char_limit], p.name
-    if suffix == ".pdf":
-        return _extract_pdf(p, char_limit=char_limit), p.name
-    if suffix == ".docx":
-        return _extract_docx(p, char_limit=char_limit), p.name
-    if suffix in _BINARY_SUFFIXES:
-        raise ValueError(
-            f"Unsupported file type '{suffix}'. "
-            "Supported formats: .txt, .md, .pdf, .docx, and HTTP/HTTPS URLs."
-        )
-    # fallback: try reading as text (handles .rst, .yaml, .json, etc.)
-    try:
-        return p.read_text(errors="replace")[:char_limit], p.name
-    except Exception:
-        return "", p.name
-
-
-def _fetch_url(url: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
-    """Fetch a URL, strip boilerplate HTML tags, and return plain text with the page title.
-
-    Args:
-        url: HTTP or HTTPS URL to fetch.
-        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
-
-    Returns:
-        A tuple of (plain_text, page_title). Text is capped at ``char_limit`` characters.
-
-    Raises:
-        requests.HTTPError: The server returned a non-2xx status code.
-    """
-    resp = requests.get(url, timeout=20, headers={"User-Agent": "llm-wiki/1.0"})
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-    for tag in soup(["script", "style", "nav", "footer", "aside"]):
-        tag.decompose()
-    title = soup.title.string.strip() if soup.title and soup.title.string else url
-    text = soup.get_text(separator="\n", strip=True)
-    return text[:char_limit], title
-
-
-def _extract_pdf(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
-    """Extract text from a PDF file using pypdf.
-
-    Args:
-        path: Path to the PDF file.
-        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
-
-    Returns:
-        Concatenated page text capped at ``char_limit`` characters,
-        or an empty string if pypdf is not installed.
-    """
-    try:
-        import pypdf  # pyright: ignore[reportMissingImports]
-
-        reader = pypdf.PdfReader(str(path))  # pyright: ignore[reportUnknownMemberType]
-        pages: list[str] = [  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-            p.extract_text() or "" for p in reader.pages
-        ]
-        return "\n".join(pages)[:char_limit]
-    except ImportError:
-        log.warning("pypdf not installed; install it for PDF support: pip install pypdf")
-        return ""
-
-
-def _extract_docx(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
-    """Extract plain text from a .docx file using python-docx.
-
-    Args:
-        path: Path to the .docx file.
-        char_limit: Maximum characters to return. Defaults to ``SOURCE_CHAR_LIMIT``.
-
-    Returns:
-        Concatenated paragraph text capped at ``char_limit`` characters,
-        or an empty string if python-docx is not installed.
-    """
-    try:
-        import docx  # python-docx package name is 'docx' at import time  # pyright: ignore[reportMissingImports]
-
-        doc = docx.Document(str(path))  # pyright: ignore[reportUnknownMemberType]
-        text = "\n".join(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
-            p.text for p in doc.paragraphs if p.text.strip()
-        )
-        return text[:char_limit]
-    except ImportError:
-        log.warning(
-            "python-docx not installed; install it for .docx support: pip install python-docx"
-        )
-        return ""
-
-
-# ---------------------------------------------------------------------------
 # Context helpers
 # ---------------------------------------------------------------------------
 
@@ -567,152 +335,6 @@ def _fetch_related(vault_path: Path, wiki_root: Path, text: str) -> str:
             content = page_path.read_text()[:1500]
             parts.append(f"### {r['title']} ({r['file_path']})\n{content}")
     return "\n\n".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Prompt & parsing
-# ---------------------------------------------------------------------------
-
-
-def _build_ingest_prompt(
-    vault_name: str, schema: str, related: str, filename: str, text: str
-) -> str:
-    """Assemble the LLM prompt that instructs the model to produce wiki page JSON.
-
-    Args:
-        vault_name: Name of the vault, embedded in the system context.
-        schema: Content of wiki/schema.md describing vault conventions.
-        related: Pre-formatted snippets of existing related pages (may be empty).
-        filename: Display name of the source (URL title or filename).
-        text: Extracted source text to ingest.
-
-    Returns:
-        A single prompt string ready to be sent as a user message to the LLM.
-    """
-    related_section = (
-        f"## Existing Related Pages\n{related}"
-        if related
-        else "## Existing Related Pages\n(none yet)"
-    )
-    return textwrap.dedent(f"""
-        You are a wiki editor for a personal knowledge base called "{vault_name}".
-
-        ## Vault Schema
-        {schema}
-
-        {related_section}
-
-        ## Source to Ingest
-        Filename/Title: {filename}
-
-        {text}
-
-        ---
-
-        Produce wiki updates as **valid JSON** (no markdown fences, no prose before/after):
-
-        {{
-          "source_page": {{
-            "file_path": "Sources/<SlugTitle>.md",
-            "content": "<full markdown with YAML frontmatter>"
-          }},
-          "page_updates": [
-            {{
-              "file_path": "Concepts/<PageName>.md",
-              "action": "create",
-              "content": "<full markdown with YAML frontmatter>"
-            }}
-          ]
-        }}
-
-        Rules:
-        - source_page goes in Sources/; write a clear summary with [[wikilinks]] to concepts
-        - Create or update pages in Concepts/ and Entities/ as appropriate
-        - "action": "create" — write this page (replaces existing content if the page already exists)
-        - "action": "update" — alias for create; always provide the complete updated page content
-        - YAML frontmatter must include title and tags fields
-        - Always quote YAML string values that contain colons: title: "Foo: Bar" not title: Foo: Bar
-        - Use Obsidian [[Page Name]] syntax for all internal links
-        - If a source contradicts an existing page, add a ## Contradictions section
-        - page_updates may be an empty array if no concept/entity pages need changes
-    """).strip()
-
-
-def _build_ingest_prompt_strict(
-    vault_name: str, schema: str, related: str, filename: str, text: str
-) -> str:
-    """Assemble a stricter ingest prompt for retry when the initial JSON parse fails.
-
-    Identical to ``_build_ingest_prompt`` but prepends an explicit constraint
-    requiring the response to be a bare JSON object with no surrounding prose or fences.
-
-    Args:
-        vault_name: Name of the vault.
-        schema: Content of wiki/schema.md.
-        related: Pre-formatted related page snippets.
-        filename: Display name of the source.
-        text: Extracted source text.
-
-    Returns:
-        A single prompt string with a leading JSON-only constraint.
-    """
-    preamble = textwrap.dedent("""\
-        IMPORTANT: Your entire response must be a single valid JSON object.
-        Do not write any text before or after the JSON.
-        Do not use markdown code fences.
-        Start your response with { and end with }.
-
-    """)
-    return preamble + _build_ingest_prompt(vault_name, schema, related, filename, text)
-
-
-def _parse_llm_json(raw: str) -> dict[str, Any]:
-    """Parse the LLM's JSON response, attempting repair before failing.
-
-    Strips markdown fences, tries json.loads, then json_repair.repair_json as a fallback.
-    Logs a warning when repair is needed so the user can see which models are unreliable.
-
-    Args:
-        raw: Raw string returned by the LLM.
-
-    Returns:
-        Parsed dict containing at least ``source_page`` and ``page_updates`` keys.
-
-    Raises:
-        ValueError: The string could not be parsed or repaired into valid JSON,
-            or the repaired result is missing the ``source_page`` key.
-    """
-    from json_repair import repair_json
-
-    # Strip markdown fences and leading/trailing prose
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.MULTILINE)
-
-    # Find the outermost JSON object — handles prose before/after the JSON block
-    obj_match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if obj_match:
-        cleaned = obj_match.group(0)
-
-    # First attempt: standard parse (fast path, works for well-formed output)
-    try:
-        data: dict[str, Any] = json.loads(cleaned)
-    except json.JSONDecodeError:
-        log.warning(
-            "LLM output was not valid JSON; attempting repair. "
-            "Consider using a larger model or structured output."
-        )
-        try:
-            repaired = repair_json(cleaned, return_objects=False)
-            data = json.loads(repaired)
-        except (json.JSONDecodeError, ValueError) as e:
-            raise ValueError(
-                f"LLM returned JSON that could not be repaired: {e}\n\nRaw output:\n{raw[:500]}"
-            ) from e
-
-    if "source_page" not in data:
-        raise ValueError("LLM response missing 'source_page' key")
-    data.setdefault("page_updates", [])
-    return data
 
 
 # ---------------------------------------------------------------------------

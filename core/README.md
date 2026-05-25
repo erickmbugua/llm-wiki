@@ -10,6 +10,9 @@ The shared Python library used by the CLI (`main.py`), the web server (`core/ser
 core/
 ├── config.py       Global + per-vault configuration
 ├── embeddings.py   compute_embedding() — provider-agnostic litellm embedding call
+├── extraction.py   Text extraction from files and URLs (_extract_text, _fetch_url, _extract_pdf, _extract_docx)
+├── chunking.py     Overlapping window splitting and map-reduce summarization (_chunk_text, _summarize_chunks)
+├── prompts.py      Ingest prompt assembly and LLM JSON parsing (_build_ingest_prompt, _parse_llm_json)
 ├── db/             SQLite persistence layer (split by concern)
 │   ├── __init__.py     Re-exports all public symbols
 │   ├── connection.py   get_db(), schema DDL
@@ -20,7 +23,7 @@ core/
 │   └── jobs.py         ingest_jobs CRUD
 ├── vault.py        Vault init and stats
 ├── watcher.py      Watchdog file monitor on raw/
-├── ingest.py       Text extraction + LLM-powered page generation
+├── ingest.py       Orchestration only: extract → related search → LLM call → parse → write → reconcile → log
 ├── query.py        FTS5 context + LLM-powered Q&A
 ├── lint.py         Structural checks + LLM contradiction detection
 ├── server.py       FastAPI app: REST API + static file serving
@@ -172,21 +175,73 @@ On detection: calls `queue_raw_file()` → then calls `on_file` callback if prov
 
 ---
 
+## extraction.py
+
+Text extraction from local files and remote URLs. No LLM calls here.
+
+**`_extract_text(source, char_limit) → tuple[str, str]`**
+Dispatches to `_fetch_url`, `_extract_pdf`, `_extract_docx`, or plain `Path.read_text` based on the source string. Returns `(text, display_name)`. Raises `ValueError` for known binary formats (`.xlsx`, images, archives, etc.).
+
+**`_fetch_url(url, char_limit) → tuple[str, str]`**
+`requests.get` + `BeautifulSoup` — strips `script/style/nav/footer/aside`, returns `(plain_text, page_title)`. Patch target: `core.extraction.requests.get`.
+
+**`_extract_pdf(path, char_limit) → str`**
+`pypdf` (optional; logs a warning and returns `""` if not installed).
+
+**`_extract_docx(path, char_limit) → str`**
+`python-docx` (optional; logs a warning and returns `""` if not installed).
+
+**`SOURCE_CHAR_LIMIT = 24_000`** — default character cap; all extractors default to this.
+
+Extension point: add new format support in `_extract_text()` by matching on suffix or URL pattern.
+
+---
+
+## chunking.py
+
+Chunking and map-reduce summarization for large documents. No direct DB or file I/O.
+
+**`_chunk_text(text, chunk_size, overlap) → list[str]`**
+Splits text into overlapping windows. Returns `[text]` unchanged when `len(text) <= chunk_size`. Tries to break at newlines in the last 200 characters of each window.
+
+**`_summarize_chunks(chunks, model, vault_name, filename, context_chars) → str`**
+Calls `litellm.completion` once per chunk (temperature 0.1) to extract bullet-point summaries, then concatenates. Truncates to `context_chars` when combined output is too large.
+Patch target for tests: `core.chunking.litellm.completion`.
+
+---
+
+## prompts.py
+
+Ingest prompt assembly and LLM JSON parsing. No LLM calls (parsing only); `_summarize_chunks` in `chunking.py` is the only caller that makes LLM calls from prompt-adjacent code.
+
+**`_build_ingest_prompt(vault_name, schema, related, filename, text) → str`**
+Assembles the primary ingest prompt. Extension point: edit this to change the wiki page format the LLM generates.
+
+**`_build_ingest_prompt_strict(vault_name, schema, related, filename, text) → str`**
+Retry variant — prepends an explicit "bare JSON object only" constraint before the standard prompt. Called by `ingest_source` when the first parse fails.
+
+**`_parse_llm_json(raw) → dict[str, Any]`**
+Strips markdown fences, extracts the outermost `{...}` block, tries `json.loads`, then `json_repair.repair_json` as fallback. Raises `ValueError` on unrecoverable input or when `source_page` is missing.
+
+---
+
 ## ingest.py
 
-The most complex module. Orchestrates: extract → search related → LLM prompt → parse → write → reconcile → log.
+Orchestration only. Delegates text extraction to `extraction.py`, chunking to `chunking.py`, and prompt/parsing to `prompts.py`.
 
 ### `ingest_source(vault_path, source, vault_name, dry_run=False)`
 
-1. **Extract** text from `source` (URL, `.txt/.md`, `.pdf`, or any readable file)
-2. **Search** existing wiki for related pages (first 500 chars of text → FTS5 seed query)
+1. **Extract** text via `_extract_text()` (from `extraction.py`)
+2. **Search** existing wiki for related pages (first 500 chars → FTS5 seed query)
 3. **Load schema** from `wiki/schema.md`
-4. **Prompt LLM** with source content + related pages + schema
-5. **Parse** JSON response (strips markdown fences defensively)
-6. **Write** pages to `wiki/` (create or merge-append for existing pages)
-7. **Reconcile** DB
-8. **Append** to `log.md`
-9. **Rebuild** `wiki/index.md` via `rebuild_index(vault_path)` (skipped when `dry_run=True`)
+4. **Chunk** large documents via `_chunk_text` + `_summarize_chunks` (from `chunking.py`)
+5. **Prompt LLM** with source content + related pages + schema (prompt from `prompts.py`)
+6. **Parse** JSON response via `_parse_llm_json()` (from `prompts.py`); retries with strict prompt on failure
+7. **Write** pages to `wiki/` via `_write_pages()`
+8. **Reconcile** DB via `partial_reconcile()`
+9. **Store embeddings** via `_store_embeddings()`
+10. **Append** to `log.md` via `_append_log()`
+11. **Rebuild** `wiki/index.md` via `rebuild_index()` (skipped when `dry_run=True`)
 
 ### `ingest_queued(vault_path, vault_name)`
 Processes all `pending` queue items from `ingest_queue`. Sets status to `processing` before calling `ingest_source`, then `done` or `failed`. Used by the watcher callback path.
@@ -201,19 +256,6 @@ The LLM is asked to return:
   ]
 }
 ```
-`_parse_llm_json()` strips markdown fences before parsing. If the LLM returns invalid JSON, a `ValueError` is raised with the raw output for debugging.
-
-### Text extraction
-- URLs → `requests.get` + `BeautifulSoup` (strips `script/style/nav/footer/aside`)
-- `.pdf` → `pypdf` (optional; warn if not installed)
-- `.docx` → `python-docx` (extracts paragraph text)
-- Binary files (`.zip`, `.exe`, etc.) → rejected with a clear `ValueError`
-- Everything else → `Path.read_text(errors='replace')`
-- All sources truncated to `resolve_context_chars(vault_path)` chars before sending to LLM (default 24,000; configurable per-vault with `llm-wiki set-context`)
-
-### Extension points
-- Add new extractors in `_extract_text()` by matching on suffix or URL pattern
-- Edit `_build_ingest_prompt()` to change the wiki page format the LLM generates
 
 ---
 

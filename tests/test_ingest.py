@@ -7,17 +7,15 @@ import pytest
 import requests as req
 
 import core.ingest
+from core.chunking import _chunk_text, _summarize_chunks
+from core.extraction import _extract_text
 from core.ingest import (
     _append_log,
-    _build_ingest_prompt,
     _check_ollama,
-    _chunk_text,
-    _extract_text,
-    _parse_llm_json,
-    _summarize_chunks,
     _write_pages,
     ingest_source,
 )
+from core.prompts import _build_ingest_prompt, _parse_llm_json
 
 # ── _chunk_text ───────────────────────────────────────────────────────────────
 
@@ -63,7 +61,7 @@ class TestSummarizeChunks:
     def test_calls_model_once_per_chunk(self, fake_llm_response):
         chunks = ["chunk one", "chunk two", "chunk three"]
         mock_resp = fake_llm_response("• Key point")
-        with patch("core.ingest.litellm.completion", return_value=mock_resp) as mock_llm:
+        with patch("core.chunking.litellm.completion", return_value=mock_resp) as mock_llm:
             result = _summarize_chunks(
                 chunks, model="claude-sonnet-4-6", vault_name="TestVault", filename="doc.txt"
             )
@@ -79,7 +77,7 @@ class TestSummarizeChunks:
         # Each chunk summary is 10k chars → 3 chunks = 30k total > 5k context_chars
         big_summary = "x" * 10_000
         mock_resp = fake_llm_response(big_summary)
-        with patch("core.ingest.litellm.completion", return_value=mock_resp):
+        with patch("core.chunking.litellm.completion", return_value=mock_resp):
             result = _summarize_chunks(
                 ["a", "b", "c"],
                 model="claude-sonnet-4-6",
@@ -118,7 +116,7 @@ class TestExtractText:
         fake_response.text = (
             "<html><head><title>My Page</title></head><body><p>Content here</p></body></html>"
         )
-        with patch("core.ingest.requests.get", return_value=fake_response):
+        with patch("core.extraction.requests.get", return_value=fake_response):
             text, name = _extract_text("https://example.com/page")
         assert "Content here" in text
         assert name == "My Page"
@@ -126,7 +124,7 @@ class TestExtractText:
     def test_url_strips_script_tags(self):
         fake_response = MagicMock()
         fake_response.text = "<html><body><script>evil()</script><p>Clean text</p></body></html>"
-        with patch("core.ingest.requests.get", return_value=fake_response):
+        with patch("core.extraction.requests.get", return_value=fake_response):
             text, _ = _extract_text("https://example.com")
         assert "evil()" not in text
         assert "Clean text" in text
@@ -156,7 +154,7 @@ class TestExtractText:
         path = tmp_path / "doc.docx"
         path.write_bytes(b"fake")
         with patch.dict(sys.modules, {"docx": None}):
-            from core.ingest import _extract_docx
+            from core.extraction import _extract_docx
 
             result = _extract_docx(path)
         assert result == ""
