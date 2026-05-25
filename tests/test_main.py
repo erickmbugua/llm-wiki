@@ -66,3 +66,18 @@ class TestUnregisterCommand:
     def test_errors_for_unknown_vault(self, runner, two_vault_config):
         result = runner.invoke(cli, ["unregister", "Nonexistent"])
         assert result.exit_code != 0
+
+
+# ── set-model validation ───────────────────────────────────────────────────────
+
+
+class TestSetModelValidation:
+    def test_unknown_prefix_prints_warning(self, runner, patched_global_config):
+        result = runner.invoke(cli, ["set-model", "gpt5"])
+        assert result.exit_code == 0
+        assert "Warning" in result.output
+
+    def test_known_prefix_no_warning(self, runner, patched_global_config):
+        result = runner.invoke(cli, ["set-model", "ollama/llama3"])
+        assert result.exit_code == 0
+        assert "Warning" not in result.output

@@ -129,12 +129,42 @@ def unregister(vault_name: str):
 # Model configuration
 # ---------------------------------------------------------------------------
 
+_KNOWN_MODEL_PREFIXES = (
+    "ollama/",
+    "claude-",
+    "anthropic/",
+    "openai/",
+    "gpt-",
+    "gemini/",
+    "mistral/",
+    "groq/",
+    "together_ai/",
+    "bedrock/",
+    "vertex_ai/",
+    "azure/",
+    "cohere/",
+    "huggingface/",
+)
+
+
+def _warn_if_unknown_model(model: str) -> None:
+    """Print a yellow warning when model doesn't match any known litellm provider prefix."""
+    if not any(model.startswith(p) for p in _KNOWN_MODEL_PREFIXES):
+        console.print(
+            f"[yellow]Warning:[/yellow] '{model}' doesn't match any known provider prefix. "
+            "Double-check the litellm model string — ingest will fail if it is invalid."
+        )
+
 
 @cli.command("set-model")
 @click.argument("model")
 @click.option("--vault", "-v", default=None, help="Apply to a specific vault only")
 def set_model(model: str, vault: str | None):
-    """Set the LiteLLM model string (e.g. claude-sonnet-4-6, gpt-4o, ollama/llama3)."""
+    """Set the LiteLLM model string (e.g. claude-sonnet-4-6, gpt-4o, ollama/llama3).
+
+    Prints a yellow warning when the model string does not match any known provider
+    prefix, so misconfigured strings are caught before the first ingest attempt.
+    """
     config = GlobalConfig.load()
     if vault:
         try:
@@ -152,6 +182,7 @@ def set_model(model: str, vault: str | None):
         config.model = model
         config.save()
         console.print(f"[green]✓[/green] Global model → [bold]{model}[/bold]")
+    _warn_if_unknown_model(model)
 
 
 # ---------------------------------------------------------------------------
