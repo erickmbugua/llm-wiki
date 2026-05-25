@@ -164,7 +164,7 @@ def set_model(model: str, vault: str | None):
 @click.option("--vault", "-v", default=None, help="Vault name (uses default if unset)")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without writing")
 def ingest(source: str, vault: str | None, dry_run: bool):
-    """Ingest a file or URL into the wiki."""
+    """Ingest a file or URL into the wiki. May take up to two minutes on a local model."""
     from core.ingest import ingest_source
 
     config = GlobalConfig.load()
@@ -176,7 +176,8 @@ def ingest(source: str, vault: str | None, dry_run: bool):
 
     console.print(f"Ingesting [bold]{source}[/bold] into vault [bold]{vname}[/bold]...")
     try:
-        result = ingest_source(vpath, source, vname, dry_run=dry_run)
+        with console.status("[dim]Calling model to generate wiki pages…[/dim]", spinner="dots"):
+            result = ingest_source(vpath, source, vname, dry_run=dry_run)
     except Exception as e:
         console.print(f"[red]Ingest failed: {e}[/red]")
         raise SystemExit(1) from None
@@ -199,7 +200,7 @@ def ingest(source: str, vault: str | None, dry_run: bool):
 @click.option("--vault", "-v", default=None, help="Vault name")
 @click.option("--save-as", default=None, help="Save answer as a wiki page at this path")
 def query(question: str, vault: str | None, save_as: str | None):
-    """Ask a question and get an answer grounded in wiki content."""
+    """Ask a question answered from wiki content. May take up to two minutes on a local model."""
     from core.query import query_wiki
 
     config = GlobalConfig.load()
@@ -211,7 +212,8 @@ def query(question: str, vault: str | None, save_as: str | None):
 
     console.print(f"Querying vault [bold]{vname}[/bold]...\n")
     try:
-        result = query_wiki(vpath, question, save_as=save_as)
+        with console.status("[dim]Searching wiki and calling model…[/dim]", spinner="dots"):
+            result = query_wiki(vpath, question, save_as=save_as)
     except Exception as e:
         console.print(f"[red]Query failed: {e}[/red]")
         raise SystemExit(1) from None
@@ -226,7 +228,7 @@ def query(question: str, vault: str | None, save_as: str | None):
 @cli.command()
 @click.option("--vault", "-v", default=None, help="Vault name")
 def lint(vault: str | None):
-    """Run a lint pass: find orphans, broken links, and LLM-detected contradictions."""
+    """Run a lint pass: orphans, broken links, contradictions. May take up to two minutes."""
     from core.lint import lint_vault
 
     config = GlobalConfig.load()
@@ -238,7 +240,10 @@ def lint(vault: str | None):
 
     console.print(f"Linting vault [bold]{vname}[/bold]...")
     try:
-        result = lint_vault(vpath)
+        with console.status(
+            "[dim]Running lint pass (structural + LLM review)…[/dim]", spinner="dots"
+        ):
+            result = lint_vault(vpath)
     except Exception as e:
         console.print(f"[red]Lint failed: {e}[/red]")
         raise SystemExit(1) from None
