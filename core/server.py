@@ -214,7 +214,7 @@ class IngestRequest(BaseModel):
 
 
 @app.post("/api/vaults/{vault_name}/ingest")
-async def api_ingest(vault_name: str, req: IngestRequest):
+def api_ingest(vault_name: str, req: IngestRequest):
     """Ingest a source URL or file path into the vault, with optional dry-run mode."""
     vname, vpath = _get_vault(vault_name)
     vcfg = VaultConfig.load(vpath)
@@ -231,7 +231,7 @@ class QueryRequest(BaseModel):
 
 
 @app.post("/api/vaults/{vault_name}/query")
-async def api_query(vault_name: str, req: QueryRequest):
+def api_query(vault_name: str, req: QueryRequest):
     """Answer a natural-language question grounded in vault content, optionally saving the result."""
     _, vpath = _get_vault(vault_name)
     try:
@@ -242,7 +242,7 @@ async def api_query(vault_name: str, req: QueryRequest):
 
 
 @app.post("/api/vaults/{vault_name}/lint")
-async def api_lint(vault_name: str):
+def api_lint(vault_name: str):
     """Run a full structural and LLM quality lint pass on the vault."""
     _, vpath = _get_vault(vault_name)
     try:

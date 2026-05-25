@@ -201,6 +201,13 @@ if not raw:
 raw = str(raw)  # narrows Unknown out of the union
 ```
 
+### FastAPI endpoint threading — `def` vs `async def`
+`api_ingest`, `api_query`, and `api_lint` in `core/server.py` are declared as plain `def`,
+**not** `async def`. This is intentional. FastAPI automatically runs `def` endpoints in
+anyio's thread pool, keeping the event loop free while `litellm.completion` blocks (30–120 s
+on a local 7B model). Changing them back to `async def` would freeze the entire server
+during every LLM call. All other endpoints that only do fast I/O stay `async def`.
+
 ### Optional dependency type gaps (pypdf)
 Optional imports inside `try/except ImportError` suppress the module-not-found error but
 leave member access as `Unknown`. Suppress usage lines individually:
