@@ -8,7 +8,7 @@ from typing import Any
 import litellm
 
 from .config import resolve_embedding_config, resolve_model
-from .db import db_connection, hybrid_search, reconcile
+from .db import db_connection, hybrid_search, partial_reconcile
 from .embeddings import compute_embedding
 from .prompts import _build_query_prompt
 
@@ -58,7 +58,7 @@ def query_wiki(
     if save_as:
         saved_to = _save_answer(wiki_root, save_as, question, answer, sources)
         with db_connection(vault_path) as conn:
-            reconcile(conn, wiki_root)
+            partial_reconcile(conn, wiki_root, [wiki_root / saved_to])
 
     return {"answer": answer, "sources": sources, "saved_to": saved_to}
 
