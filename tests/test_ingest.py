@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests as req
 
+import core.ingest
 from core.ingest import (
     _append_log,
     _build_ingest_prompt,
@@ -309,6 +310,13 @@ class TestIngestSource:
 
 
 class TestCheckOllama:
+    @pytest.fixture(autouse=True)
+    def clear_ollama_cache(self):
+        """Reset the in-process Ollama verification cache between tests."""
+        core.ingest._ollama_verified.clear()
+        yield
+        core.ingest._ollama_verified.clear()
+
     def test_success_when_model_present(self):
         fake_resp = MagicMock()
         fake_resp.json.return_value = {
@@ -349,3 +357,23 @@ class TestCheckOllama:
         ):
             ingest_source(tmp_vault, str(src), "TestVault")
         mock_check.assert_not_called()
+
+    def test_check_ollama_caches_result(self):
+        """Second call with the same model must not hit the network."""
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {"models": [{"name": "qwen2.5-coder:7b"}]}
+        with patch("core.ingest.requests.get", return_value=fake_resp) as mock_get:
+            _check_ollama("ollama/qwen2.5-coder:7b")
+            _check_ollama("ollama/qwen2.5-coder:7b")
+        mock_get.assert_called_once()
+
+    def test_check_ollama_different_models_each_checked(self):
+        """Different model strings each trigger their own network check."""
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {
+            "models": [{"name": "qwen2.5-coder:7b"}, {"name": "llama3:8b"}]
+        }
+        with patch("core.ingest.requests.get", return_value=fake_resp) as mock_get:
+            _check_ollama("ollama/qwen2.5-coder:7b")
+            _check_ollama("ollama/llama3:8b")
+        assert mock_get.call_count == 2

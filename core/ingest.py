@@ -18,6 +18,10 @@ from .database import get_db, get_pending_queue, mark_queue_item, reconcile, sea
 
 log = logging.getLogger(__name__)
 
+# Models whose Ollama availability has already been verified this process lifetime.
+# Avoids a redundant GET /api/tags on every item in a batched ingest queue.
+_ollama_verified: set[str] = set()
+
 # Maximum characters fed to the LLM per source
 SOURCE_CHAR_LIMIT = 24_000
 RELATED_PAGES_LIMIT = 5
@@ -146,6 +150,9 @@ def ingest_queued(vault_path: Path, vault_name: str) -> list[dict[str, Any]]:
 def _check_ollama(model: str) -> None:
     """Verify the Ollama server is reachable and the requested model is pulled.
 
+    Results are cached in ``_ollama_verified`` for the lifetime of the process,
+    so repeated calls for the same model string skip the network round-trip.
+
     Args:
         model: litellm-format model string, e.g. ``"ollama/qwen2.5-coder:7b"``.
 
@@ -153,6 +160,8 @@ def _check_ollama(model: str) -> None:
         RuntimeError: Ollama server is not running or unreachable.
         RuntimeError: The specific model has not been pulled locally.
     """
+    if model in _ollama_verified:
+        return
     base_url = os.environ.get("OLLAMA_API_BASE", "http://localhost:11434").rstrip("/")
     model_name = model[len("ollama/") :]
 
@@ -173,6 +182,7 @@ def _check_ollama(model: str) -> None:
             f"Model '{model_name}' is not pulled. Run: ollama pull {model_name}\n"
             f"Available models: {listed}"
         )
+    _ollama_verified.add(model)
 
 
 # ---------------------------------------------------------------------------
