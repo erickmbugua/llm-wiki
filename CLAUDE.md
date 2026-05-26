@@ -158,6 +158,14 @@ wiki files (`schema.md`, `index.md`, `log.md`) created by `init_vault`. `_llm_li
 - After a truthiness guard (`if not x: raise ...`), pyright may still see `Unknown` in the union —
   use `x = str(x)` (or the appropriate cast) to explicitly narrow the type
 
+### Private vs public functions
+A leading underscore (`_name`) means **private to the module that defines it**. Enforce this strictly:
+
+- Never import a `_name` from another module — if you need it cross-module, remove the underscore and add it to `__all__`.
+- Never patch `"some.module._private"` in tests — patch the public name instead.
+- Every module's `__all__` must list only public symbols (no `_` prefix). Symbols absent from `__all__` that callers need should be made public, not imported by their private name.
+- Functions used only within their own module may keep the underscore (e.g. `_load_schema`, `_fetch_related` in `core/ingest.py`). If a test needs to call such a function directly, that is a signal it should be made public.
+
 ### Third-party library types
 When adding a new dependency, determine which category it falls into and apply the fix:
 
