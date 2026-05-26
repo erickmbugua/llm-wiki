@@ -10,9 +10,9 @@ The shared Python library used by the CLI (`main.py`), the web server (`core/ser
 core/
 ├── config.py       Global + per-vault configuration
 ├── embeddings.py   compute_embedding() — provider-agnostic litellm embedding call
-├── extraction.py   Text extraction from files and URLs (_extract_text, _fetch_url, _extract_pdf, _extract_docx)
-├── chunking.py     Overlapping window splitting and map-reduce summarization (_chunk_text, _summarize_chunks)
-├── prompts.py      Ingest prompt assembly and LLM JSON parsing (_build_ingest_prompt, _parse_llm_json)
+├── extraction.py   Text extraction from files and URLs (extract_text, fetch_url, extract_pdf, extract_docx)
+├── chunking.py     Overlapping window splitting and map-reduce summarization (chunk_text, summarize_chunks)
+├── prompts.py      Ingest prompt assembly and LLM JSON parsing (build_ingest_prompt, parse_llm_json)
 ├── db/             SQLite persistence layer (split by concern)
 │   ├── __init__.py     Re-exports all public symbols
 │   ├── connection.py   get_db(), schema DDL
@@ -104,8 +104,8 @@ model is unavailable. Truncates input to 8192 chars. Patch target in tests:
 ## db/
 
 The persistence layer. All reads/writes to `wiki.db` go through here. Import public symbols
-from `core.db`; import private helpers directly from their sub-module
-(e.g. `from core.db.pages import _infer_category`).
+from `core.db`; import helpers not re-exported by the package directly from their sub-module
+(e.g. `from core.db.pages import infer_category`).
 
 ### Schema
 
@@ -126,7 +126,7 @@ links (source_path TEXT, target_stem TEXT, PRIMARY KEY (source_path, target_stem
 
 `page_vectors` is a `vec0` virtual table provided by the **sqlite-vec** extension. `get_db` loads the extension on every connection (`sqlite_vec.load(conn)`) before calling `_ensure_schema`. The rowid of `page_vectors` is the same as `pages.id`, joined as `JOIN pages p ON v.rowid = p.id`.
 
-`links` stores one row per directed wikilink edge (`source_path → target_stem`). `upsert_page` syncs it atomically — deletes all outgoing rows for the page then re-inserts current links. `delete_page` purges link rows before removing the page. This table is the source of truth for backlink computation; `_rebuild_backlinks_full` and `_rebuild_backlinks_incremental` read from it instead of scanning page content.
+`links` stores one row per directed wikilink edge (`source_path → target_stem`). `upsert_page` syncs it atomically — deletes all outgoing rows for the page then re-inserts current links. `delete_page` purges link rows before removing the page. This table is the source of truth for backlink computation; `rebuild_backlinks_full` and `rebuild_backlinks_incremental` read from it instead of scanning page content.
 
 ### Key functions
 
@@ -134,9 +134,9 @@ links (source_path TEXT, target_stem TEXT, PRIMARY KEY (source_path, target_stem
 |---|---|
 | `get_db(vault_path)` | Opens (and creates if needed) the SQLite connection with WAL mode enabled; loads sqlite-vec |
 | `upsert_page(conn, wiki_root, md_path, embedding)` | Parses YAML frontmatter, infers category, extracts summary, upserts `pages`; stores embedding in `page_vectors` when provided |
-| `reconcile(conn, wiki_root)` | Diffs filesystem vs DB by comparing `mtime`; adds/updates/removes pages; calls `_rebuild_backlinks_full` |
-| `_rebuild_backlinks_full(conn)` | Reads the `links` table (no content scanning) and rewrites the `backlinks` JSON column for every page; logs a WARNING on title stem collisions (alphabetically first path wins) |
-| `_rebuild_backlinks_incremental(conn, changed_paths)` | Recomputes backlinks only for pages in the changed set and their direct link neighbours — O(neighbourhood) instead of O(all pages) |
+| `reconcile(conn, wiki_root)` | Diffs filesystem vs DB by comparing `mtime`; adds/updates/removes pages; calls `rebuild_backlinks_full` |
+| `rebuild_backlinks_full(conn)` | Reads the `links` table (no content scanning) and rewrites the `backlinks` JSON column for every page; logs a WARNING on title stem collisions (alphabetically first path wins) |
+| `rebuild_backlinks_incremental(conn, changed_paths)` | Recomputes backlinks only for pages in the changed set and their direct link neighbours — O(neighbourhood) instead of O(all pages) |
 | `search(conn, query, limit)` | FTS5 `MATCH` with BM25 ranking (`ORDER BY rank`) |
 | `compute_embedding(text, model)` | Calls `litellm.embedding` and returns a `list[float]`; raises `RuntimeError` if the model is unavailable |
 | `vector_search(conn, query_embedding, limit)` | KNN search over `page_vectors` using vec0 cosine distance; returns empty list when no embeddings exist |
@@ -150,7 +150,7 @@ links (source_path TEXT, target_stem TEXT, PRIMARY KEY (source_path, target_stem
 | `list_jobs(conn, limit)` | Returns up to `limit` jobs ordered newest-first |
 
 ### Category inference
-`_infer_category(rel_path)` checks the first path segment: `Sources` → `Sources`, `Concepts` → `Concepts`, `Entities` → `Entities`, anything else → `root`.
+`infer_category(rel_path)` checks the first path segment: `Sources` → `Sources`, `Concepts` → `Concepts`, `Entities` → `Entities`, anything else → `root`.
 
 ### Wikilink regex
 `\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]` — handles `[[Target]]` and `[[Target|Alias]]`, ignores section anchors (`#`).
@@ -165,6 +165,7 @@ Thin watchdog wrapper. Monitors `<vault>/raw/` for new files and queues them.
 - `start()` — schedules `_RawFolderHandler` on `raw/` (non-recursive)
 - `stop()` — graceful observer shutdown
 - `is_alive()` — check if observer thread is running
+- `handle_file(path)` — trigger the handler logic directly (bypasses watchdog; used in tests)
 
 **`_RawFolderHandler`**
 Handles `on_created` and `on_moved` events (covers both direct saves and downloads-then-moves). Ignores files with suffixes in `IGNORED_SUFFIXES` (`.db`, `.tmp`, `.part`, `.crdownload`) and dotfiles.
@@ -179,21 +180,21 @@ On detection: calls `queue_raw_file()` → then calls `on_file` callback if prov
 
 Text extraction from local files and remote URLs. No LLM calls here.
 
-**`_extract_text(source, char_limit) → tuple[str, str]`**
-Dispatches to `_fetch_url`, `_extract_pdf`, `_extract_docx`, or plain `Path.read_text` based on the source string. Returns `(text, display_name)`. Raises `ValueError` for known binary formats (`.xlsx`, images, archives, etc.).
+**`extract_text(source, char_limit) → tuple[str, str]`**
+Dispatches to `fetch_url`, `extract_pdf`, `extract_docx`, or plain `Path.read_text` based on the source string. Returns `(text, display_name)`. Raises `ValueError` for known binary formats (`.xlsx`, images, archives, etc.).
 
-**`_fetch_url(url, char_limit) → tuple[str, str]`**
+**`fetch_url(url, char_limit) → tuple[str, str]`**
 `requests.get` + `BeautifulSoup` — strips `script/style/nav/footer/aside`, returns `(plain_text, page_title)`. Patch target: `core.extraction.requests.get`.
 
-**`_extract_pdf(path, char_limit) → str`**
+**`extract_pdf(path, char_limit) → str`**
 `pypdf` (optional; logs a warning and returns `""` if not installed).
 
-**`_extract_docx(path, char_limit) → str`**
+**`extract_docx(path, char_limit) → str`**
 `python-docx` (optional; logs a warning and returns `""` if not installed).
 
 **`SOURCE_CHAR_LIMIT = 24_000`** — default character cap; all extractors default to this.
 
-Extension point: add new format support in `_extract_text()` by matching on suffix or URL pattern.
+Extension point: add new format support in `extract_text()` by matching on suffix or URL pattern.
 
 ---
 
@@ -201,10 +202,10 @@ Extension point: add new format support in `_extract_text()` by matching on suff
 
 Chunking and map-reduce summarization for large documents. No direct DB or file I/O.
 
-**`_chunk_text(text, chunk_size, overlap) → list[str]`**
+**`chunk_text(text, chunk_size, overlap) → list[str]`**
 Splits text into overlapping windows. Returns `[text]` unchanged when `len(text) <= chunk_size`. Tries to break at newlines in the last 200 characters of each window.
 
-**`_summarize_chunks(chunks, model, vault_name, filename, context_chars) → str`**
+**`summarize_chunks(chunks, model, vault_name, filename, context_chars) → str`**
 Calls `litellm.completion` once per chunk (temperature 0.1) to extract bullet-point summaries, then concatenates. Truncates to `context_chars` when combined output is too large.
 Patch target for tests: `core.chunking.litellm.completion`.
 
@@ -212,15 +213,15 @@ Patch target for tests: `core.chunking.litellm.completion`.
 
 ## prompts.py
 
-Ingest prompt assembly and LLM JSON parsing. No LLM calls (parsing only); `_summarize_chunks` in `chunking.py` is the only caller that makes LLM calls from prompt-adjacent code.
+Ingest prompt assembly and LLM JSON parsing. No LLM calls (parsing only); `summarize_chunks` in `chunking.py` is the only caller that makes LLM calls from prompt-adjacent code.
 
-**`_build_ingest_prompt(vault_name, schema, related, filename, text) → str`**
+**`build_ingest_prompt(vault_name, schema, related, filename, text) → str`**
 Assembles the primary ingest prompt. Extension point: edit this to change the wiki page format the LLM generates.
 
-**`_build_ingest_prompt_strict(vault_name, schema, related, filename, text) → str`**
+**`build_ingest_prompt_strict(vault_name, schema, related, filename, text) → str`**
 Retry variant — prepends an explicit "bare JSON object only" constraint before the standard prompt. Called by `ingest_source` when the first parse fails.
 
-**`_parse_llm_json(raw) → dict[str, Any]`**
+**`parse_llm_json(raw) → dict[str, Any]`**
 Strips markdown fences, extracts the outermost `{...}` block, tries `json.loads`, then `json_repair.repair_json` as fallback. Raises `ValueError` on unrecoverable input or when `source_page` is missing.
 
 ---
@@ -231,16 +232,16 @@ Orchestration only. Delegates text extraction to `extraction.py`, chunking to `c
 
 ### `ingest_source(vault_path, source, vault_name, dry_run=False)`
 
-1. **Extract** text via `_extract_text()` (from `extraction.py`)
+1. **Extract** text via `extract_text()` (from `extraction.py`)
 2. **Search** existing wiki for related pages (first 500 chars → FTS5 seed query)
 3. **Load schema** from `wiki/schema.md`
-4. **Chunk** large documents via `_chunk_text` + `_summarize_chunks` (from `chunking.py`)
+4. **Chunk** large documents via `chunk_text` + `summarize_chunks` (from `chunking.py`)
 5. **Prompt LLM** with source content + related pages + schema (prompt from `prompts.py`)
-6. **Parse** JSON response via `_parse_llm_json()` (from `prompts.py`); retries with strict prompt on failure
-7. **Write** pages to `wiki/` via `_write_pages()`
+6. **Parse** JSON response via `parse_llm_json()` (from `prompts.py`); retries with strict prompt on failure
+7. **Write** pages to `wiki/` via `write_pages()`
 8. **Reconcile** DB via `partial_reconcile()`
-9. **Store embeddings** via `_store_embeddings()`
-10. **Append** to `log.md` via `_append_log()`
+9. **Store embeddings** via `_store_embeddings()` (private — only called within `ingest.py`)
+10. **Append** to `log.md` via `append_log()`
 11. **Rebuild** `wiki/index.md` via `rebuild_index()` (skipped when `dry_run=True`)
 
 ### `ingest_queued(vault_path, vault_name)`
@@ -283,7 +284,7 @@ Two-phase lint:
 **Phase 1 — Structural (no LLM)**
 - **Orphans**: pages with no backlinks AND no outgoing `[[wikilinks]]` (excludes `root` category pages like `index.md`)
 - **Broken links**: `[[Target]]` references where `Target` doesn't match any page title
-- **Missing summaries**: pages where `_extract_summary()` returned empty
+- **Missing summaries**: pages where `extract_summary()` returned empty
 
 **Phase 2 — LLM quality review**
 Samples up to `CONTRADICTION_SAMPLE = 8` pages (weighted toward Sources + Concepts by summary length) and asks the LLM to report: contradictions, incomplete pages, missing links, suggestions.
