@@ -37,6 +37,7 @@ dev = [
     "pytest>=8.0",
     "pytest-mock>=3.12",
     "httpx>=0.27",
+    "pytest-httpserver>=1.0",
     "ruff>=0.4",
     "mypy>=1.10",
     "pyright>=1.1",
@@ -50,6 +51,7 @@ dev = [
 testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests — exercises real cross-module pipelines (LLM is stubbed)",
+    "e2e: marks tests as end-to-end tests — real subprocess CLI and live uvicorn server with a TCP mock LLM",
 ]
 
 [tool.ruff]

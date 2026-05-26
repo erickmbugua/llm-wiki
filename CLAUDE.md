@@ -109,6 +109,44 @@ Shared fixtures in `tests/integration/conftest.py`:
 | `patched_config` | Patches `GlobalConfig.load` and clears caches before/after each test |
 | `api_client` | `TestClient` + real `ThreadPoolExecutor` registered via `register_vault_executor` |
 
+#### E2E tests (`tests/e2e/`)
+E2E tests exercise the system through real subprocess boundaries. LLM calls are intercepted by
+a real TCP server (`pytest-httpserver`) that speaks the OpenAI API protocol. Run selectively:
+
+```bash
+pytest tests/e2e/ -q              # e2e only
+pytest -m e2e -q                  # same, by marker
+pytest -m "not integration and not e2e" -q   # unit tests only
+```
+
+Every e2e test carries the module-level `pytestmark = pytest.mark.e2e`. The three test files cover:
+
+| File | What it tests |
+|---|---|
+| `test_smoke.py` | Server startup, core route status codes, static files, CLI init/list |
+| `test_cli.py` | `llm-wiki` as a real subprocess: init, ingest, query, lint, status |
+| `test_http.py` | Real uvicorn server via httpx: all major REST routes, job lifecycle, pages/search/graph |
+
+Shared fixtures in `tests/e2e/conftest.py`:
+
+| Fixture | Purpose |
+|---|---|
+| `vault_env` | Initialised vault + temp GlobalConfig; returns subprocess env dict with `LLM_WIKI_HOME` |
+| `mock_llm_server` | `pytest-httpserver` serving OpenAI-format responses; injects `OPENAI_API_BASE` into `vault_env` |
+| `live_server` | Starts real `uvicorn core.server:app` subprocess; yields base URL; terminates on teardown |
+
+**LLM mock URL path:** litellm (via the OpenAI SDK) constructs `{OPENAI_API_BASE}/chat/completions`
+(no `/v1` prefix when `api_base` ends with a slash). The mock handler is registered at
+`/chat/completions`, not `/v1/chat/completions`.
+
+**Vault model for e2e:** per-vault config uses `model: "openai/stub"` — this bypasses the Ollama
+preflight check (which only fires for `ollama/*` strings) and routes through litellm's OpenAI
+provider to the mock server.
+
+**Lint always calls the LLM:** even on a freshly initialised vault, `reconcile` indexes the root
+wiki files (`schema.md`, `index.md`, `log.md`) created by `init_vault`. `_llm_lint`'s
+"no pages" early return is never triggered, so e2e lint tests always need `mock_llm_server`.
+
 ### Type annotations
 - All function signatures must have full type annotations
 - Never use bare `dict` or `list[dict]` — always parameterise: `dict[str, Any]`, `list[dict[str, Any]]`
@@ -159,7 +197,7 @@ All QA tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (265 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (288 tests) | `.venv/bin/pytest tests/ -q` |
 | `pre-commit` | Git hook runner (ruff + mypy on commit) | `.venv/bin/pre-commit run --all-files` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**
@@ -174,6 +212,15 @@ Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and `pyrightconf
 ---
 
 ## Known Gotchas
+
+### LLM_WIKI_HOME env var — config isolation in e2e tests
+`GlobalConfig.load()` and `.save()` default to `~/.llm-wiki/config.json`. Set
+`LLM_WIKI_HOME=/path/to/dir` to redirect both methods to `$LLM_WIKI_HOME/config.json`.
+This is the mechanism e2e tests use to isolate each test's config from the developer's real
+vault registry. The process-level cache does not encode the env var — if `LLM_WIKI_HOME`
+changes mid-process without clearing the cache via `_clear_global_config_cache()`, the stale
+cached value is returned. This is not an issue in e2e tests because each subprocess starts
+with a fresh cache.
 
 ### litellm response type
 `litellm.completion()` returns `ModelResponse | CustomStreamWrapper`. Pyright flags `.choices`
@@ -410,6 +457,8 @@ llm-wiki/
 │   ├── static/        # Vanilla JS + CSS dashboard (no Node/npm)
 │   └── templates/     # index.html entry point
 ├── tests/             # pytest suite — mirrors core/ structure
+│   ├── integration/   # Cross-module pipeline tests (LLM monkeypatched, TestClient)
+│   └── e2e/           # End-to-end tests (real subprocesses, TCP mock LLM server)
 ├── main.py            # Click CLI (llm-wiki init | ingest | query | lint | …)
 ├── main_server.py     # Startup: uvicorn + one VaultWatcher per vault
 ├── pyproject.toml     # Build, deps, ruff config, mypy config, pytest config

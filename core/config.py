@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -55,8 +56,25 @@ class GlobalConfig:
     embedding_dim: int = 768
 
     @classmethod
+    def _config_path(cls) -> Path:
+        """Return the GlobalConfig file path, honouring LLM_WIKI_HOME when set.
+
+        The env var allows e2e tests and alternative installations to redirect the
+        config location without modifying ~/.llm-wiki.
+
+        Returns:
+            Path to the config JSON file that load() and save() should use.
+        """
+        home = os.environ.get("LLM_WIKI_HOME")
+        return Path(home) / "config.json" if home else GLOBAL_CONFIG_FILE
+
+    @classmethod
     def load(cls) -> GlobalConfig:
-        """Load config from ~/.llm-wiki/config.json, returning defaults if the file is absent.
+        """Load config from the global config file, returning defaults if the file is absent.
+
+        The config file location defaults to ``~/.llm-wiki/config.json`` and can be
+        overridden by setting the ``LLM_WIKI_HOME`` environment variable to an alternate
+        directory. This is useful for e2e tests and multi-user installations.
 
         Results are cached for the lifetime of the process. Call ``_clear_global_config_cache()``
         to force a re-read (e.g. after mutating the file from another code path).
@@ -67,8 +85,9 @@ class GlobalConfig:
         global _global_cfg_cache
         if _global_cfg_cache is not None:
             return _global_cfg_cache
-        if GLOBAL_CONFIG_FILE.exists():
-            data = json.loads(GLOBAL_CONFIG_FILE.read_text())
+        config_file = cls._config_path()
+        if config_file.exists():
+            data = json.loads(config_file.read_text())
             instance = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
         else:
             instance = cls()
@@ -79,12 +98,14 @@ class GlobalConfig:
         return _global_cfg_cache
 
     def save(self) -> None:
-        """Persist the current config to ~/.llm-wiki/config.json, creating the directory if needed.
+        """Persist the current config to the global config file, creating the directory if needed.
 
-        Also invalidates the process cache so the next ``load()`` reads the updated file.
+        Respects ``LLM_WIKI_HOME`` the same way ``load()`` does. Also invalidates the
+        process cache so the next ``load()`` reads the updated file.
         """
-        GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        GLOBAL_CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
+        config_file = self._config_path()
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(json.dumps(asdict(self), indent=2))
         global _global_cfg_cache
         _global_cfg_cache = self
 

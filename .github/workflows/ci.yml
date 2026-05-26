@@ -64,7 +64,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: pytest (unit)
-        run: .venv/bin/pytest -m "not integration" -q
+        run: .venv/bin/pytest -m "not integration and not e2e" -q
 
   integration-tests:
     name: Integration tests
@@ -83,3 +83,21 @@ jobs:
 
       - name: pytest (integration)
         run: .venv/bin/pytest -m integration -q
+
+  e2e-tests:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: pytest (e2e)
+        run: .venv/bin/pytest -m e2e -q
