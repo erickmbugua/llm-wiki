@@ -79,6 +79,36 @@ from the name and signature.
 - Mock at the boundary (`core.server.ingest_source`, not `core.ingest.ingest_source`) so patches
   match where the name is actually used
 
+#### Integration tests (`tests/integration/`)
+Integration tests exercise real cross-module pipelines. The LLM is **always stubbed** — no Ollama
+required. Run selectively:
+
+```bash
+pytest tests/integration/ -q          # integration only
+pytest -m integration -q              # same, by marker
+pytest tests/ --ignore=tests/integration/ -q  # unit tests only
+pytest -m "not integration" -q        # same, by marker
+```
+
+Every integration test carries `@pytest.mark.integration`. The four test files cover:
+
+| File | What it tests |
+|---|---|
+| `test_ingest_pipeline.py` | `ingest_source` end-to-end: extraction → DB → backlinks → log → index |
+| `test_job_lifecycle.py` | HTTP 202 → real `ThreadPoolExecutor` → poll `/jobs/{id}` → terminal state |
+| `test_watcher_pipeline.py` | `VaultWatcher` detects file drop → DB queue entry → full watcher→ingest path |
+| `test_config_resolution.py` | Three-level priority chain; two vaults resolve independently |
+
+Shared fixtures in `tests/integration/conftest.py`:
+
+| Fixture | Purpose |
+|---|---|
+| `vault_path` | Real initialized vault; per-vault config sets `model: "stub/model"` to skip Ollama check |
+| `ingest_json` | Canned LLM JSON (one Sources page + one Concepts page with a `[[wikilink]]`) |
+| `llm_stub` | Patches `core.ingest.litellm.completion`; stubs embedding to raise so FTS5 fallback runs |
+| `patched_config` | Patches `GlobalConfig.load` and clears caches before/after each test |
+| `api_client` | `TestClient` + real `ThreadPoolExecutor` registered via `register_vault_executor` |
+
 ### Type annotations
 - All function signatures must have full type annotations
 - Never use bare `dict` or `list[dict]` — always parameterise: `dict[str, Any]`, `list[dict[str, Any]]`
@@ -129,7 +159,7 @@ All QA tools run from the project venv: `.venv/bin/<tool>`
 | `ruff format` | Formatting | `.venv/bin/ruff format .` |
 | `mypy` | Static type checking | `.venv/bin/mypy` |
 | `pyright` | Pylance-compatible type checking | `.venv/bin/pyright` |
-| `pytest` | Test suite (248 tests) | `.venv/bin/pytest tests/ -q` |
+| `pytest` | Test suite (265 tests) | `.venv/bin/pytest tests/ -q` |
 | `pre-commit` | Git hook runner (ruff + mypy on commit) | `.venv/bin/pre-commit run --all-files` |
 
 **Before declaring any task complete, all five commands must exit cleanly with zero errors.**

@@ -145,6 +145,29 @@ Available MCP tools: `search_wiki`, `view_page`, `list_pages`, `ingest`, `query`
 
 ---
 
+## Running the Tests
+
+```bash
+# Install dev dependencies first
+uv sync --extra dev
+
+# Full suite (unit + integration, 265 tests)
+.venv/bin/pytest tests/ -q
+
+# Unit tests only (fast, no external processes)
+.venv/bin/pytest -m "not integration" -q
+
+# Integration tests only (exercises real pipelines, LLM is stubbed — no Ollama needed)
+.venv/bin/pytest -m integration -q
+
+# All QA tools in the required order
+.venv/bin/ruff check --fix . && .venv/bin/ruff format . && .venv/bin/mypy && .venv/bin/pyright && .venv/bin/pytest tests/ -q
+```
+
+Integration tests cover four areas: the full ingest pipeline (extraction → DB → backlinks → log → index), the HTTP 202 job lifecycle (POST → poll → terminal state), the file-watcher pipeline (watchdog → queue → ingest), and the three-level config resolution chain. All use a stubbed LLM — no running model is required.
+
+---
+
 ## Key Data Flows
 
 **Ingest:** `raw/` file detected → `VaultWatcher` queues it → `ingest_source()` extracts text → LiteLLM generates wiki pages → pages written to `wiki/` → `partial_reconcile()` updates FTS5 index for changed files only → `log.md` appended.
