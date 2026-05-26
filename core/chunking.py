@@ -1,8 +1,8 @@
 """Text chunking and map-reduce summarization for large documents.
 
 Public surface:
-- _chunk_text()       — split text into overlapping windows
-- _summarize_chunks() — call LLM once per chunk and concatenate summaries
+- chunk_text()       — split text into overlapping windows
+- summarize_chunks() — call LLM once per chunk and concatenate summaries
 """
 
 from __future__ import annotations
@@ -11,12 +11,12 @@ import logging
 
 import litellm
 
-__all__ = ["_chunk_text", "_summarize_chunks"]
+__all__ = ["chunk_text", "summarize_chunks"]
 
 log = logging.getLogger(__name__)
 
 
-def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
+def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     """Split text into overlapping chunks of at most chunk_size characters.
 
     Args:
@@ -50,7 +50,7 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     return chunks
 
 
-def _summarize_chunks(
+def summarize_chunks(
     chunks: list[str],
     model: str,
     vault_name: str,

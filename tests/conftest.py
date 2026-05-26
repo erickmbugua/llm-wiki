@@ -74,11 +74,11 @@ def patched_global_config(
     cfg_dir.mkdir()
     monkeypatch.setattr("core.config.GLOBAL_CONFIG_DIR", cfg_dir)
     monkeypatch.setattr("core.config.GLOBAL_CONFIG_FILE", cfg_dir / "config.json")
-    cfg_mod._clear_global_config_cache()
-    cfg_mod._clear_vault_config_cache()
+    cfg_mod.clear_global_config_cache()
+    cfg_mod.clear_vault_config_cache()
     yield cfg_dir
-    cfg_mod._clear_global_config_cache()
-    cfg_mod._clear_vault_config_cache()
+    cfg_mod.clear_global_config_cache()
+    cfg_mod.clear_vault_config_cache()
 
 
 # ── LLM mock helpers ─────────────────────────────────────────────────────────

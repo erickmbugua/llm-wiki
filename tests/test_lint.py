@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from core.db import get_db, list_pages, reconcile
-from core.lint import _save_lint_report, _structural_checks, lint_vault
+from core.lint import lint_vault, save_lint_report, structural_checks
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ def _reconciled_pages(vault_path: Path) -> list[dict[str, Any]]:
     return pages
 
 
-# ── _structural_checks ────────────────────────────────────────────────────────
+# ── structural_checks ─────────────────────────────────────────────────────────
 
 
 class TestStructuralChecks:
@@ -43,13 +43,13 @@ class TestStructuralChecks:
             ],
         )
         pages = _reconciled_pages(tmp_vault)
-        result = _structural_checks(wiki, pages)
+        result = structural_checks(wiki, pages)
         assert "Concepts/Orphan.md" in result["orphans"]
 
     def test_linked_page_not_orphan(self, populated_vault: Path) -> None:
         wiki = populated_vault / "wiki"
         pages = _reconciled_pages(populated_vault)
-        result = _structural_checks(wiki, pages)
+        result = structural_checks(wiki, pages)
         # Transformers links to Attention → neither should be an orphan
         assert "Concepts/Transformers.md" not in result["orphans"]
         assert "Concepts/Attention.md" not in result["orphans"]
@@ -63,14 +63,14 @@ class TestStructuralChecks:
             ],
         )
         pages = _reconciled_pages(tmp_vault)
-        result = _structural_checks(wiki, pages)
+        result = structural_checks(wiki, pages)
         assert "Concepts/Linker.md" in result["broken_links"]
         assert "DoesNotExist" in result["broken_links"]["Concepts/Linker.md"]
 
     def test_no_broken_links_for_valid_wikilinks(self, populated_vault: Path) -> None:
         wiki = populated_vault / "wiki"
         pages = _reconciled_pages(populated_vault)
-        result = _structural_checks(wiki, pages)
+        result = structural_checks(wiki, pages)
         # Transformers → [[Attention]] exists
         assert "Concepts/Transformers.md" not in result["broken_links"]
 
@@ -83,23 +83,23 @@ class TestStructuralChecks:
             ],
         )
         pages = _reconciled_pages(tmp_vault)
-        result = _structural_checks(wiki, pages)
+        result = structural_checks(wiki, pages)
         assert "Concepts/NoBody.md" in result["missing_summaries"]
 
     def test_empty_vault_returns_no_issues(self, tmp_vault: Path) -> None:
         pages = _reconciled_pages(tmp_vault)
-        result = _structural_checks(tmp_vault / "wiki", pages)
+        result = structural_checks(tmp_vault / "wiki", pages)
         assert result["broken_links"] == {}
 
     def test_root_category_pages_excluded_from_orphan_check(self, tmp_vault: Path) -> None:
         # index.md, log.md, schema.md are root-category pages with no links
         pages = _reconciled_pages(tmp_vault)
-        result = _structural_checks(tmp_vault / "wiki", pages)
+        result = structural_checks(tmp_vault / "wiki", pages)
         orphans = result["orphans"]
         assert not any("index.md" in o or "log.md" in o or "schema.md" in o for o in orphans)
 
 
-# ── _save_lint_report ─────────────────────────────────────────────────────────
+# ── save_lint_report ──────────────────────────────────────────────────────────
 
 
 class TestSaveLintReport:
@@ -116,13 +116,13 @@ class TestSaveLintReport:
         }
 
     def test_creates_report_file(self, tmp_vault: Path) -> None:
-        path = _save_lint_report(
+        path = save_lint_report(
             tmp_vault, tmp_vault / "wiki", self._structural(), "LLM report text."
         )
         assert (tmp_vault / path).exists()
 
     def test_report_filename_includes_timestamp(self, tmp_vault: Path) -> None:
-        path = _save_lint_report(tmp_vault, tmp_vault / "wiki", self._structural(), "Report.")
+        path = save_lint_report(tmp_vault, tmp_vault / "wiki", self._structural(), "Report.")
         assert path.startswith("lint-")
         assert path.endswith(".md")
 
@@ -131,20 +131,20 @@ class TestSaveLintReport:
             orphans=["Concepts/A.md"],
             broken={"Concepts/B.md": ["Missing"]},
         )
-        path = _save_lint_report(tmp_vault, tmp_vault / "wiki", structural, "LLM report.")
+        path = save_lint_report(tmp_vault, tmp_vault / "wiki", structural, "LLM report.")
         content = (tmp_vault / path).read_text()
         assert "Concepts/A.md" in content
         assert "Concepts/B.md" in content
 
     def test_report_contains_llm_report(self, tmp_vault: Path) -> None:
-        path = _save_lint_report(
+        path = save_lint_report(
             tmp_vault, tmp_vault / "wiki", self._structural(), "Unique LLM finding xyz."
         )
         content = (tmp_vault / path).read_text()
         assert "Unique LLM finding xyz." in content
 
     def test_appends_entry_to_log(self, tmp_vault: Path) -> None:
-        _save_lint_report(tmp_vault, tmp_vault / "wiki", self._structural(), "Report.")
+        save_lint_report(tmp_vault, tmp_vault / "wiki", self._structural(), "Report.")
         log = (tmp_vault / "wiki" / "log.md").read_text()
         assert "Lint pass" in log
 
@@ -207,20 +207,20 @@ class TestLintVault:
 
 class TestRotateLintReports:
     def test_rotate_lint_reports_removes_oldest(self, tmp_path: Path) -> None:
-        from core.lint import _rotate_lint_reports
+        from core.lint import rotate_lint_reports
 
         for i in range(12):
             (tmp_path / f"lint-2026-01-{i + 1:02d}-0000.md").write_text("x")
-        _rotate_lint_reports(tmp_path, keep=10)
+        rotate_lint_reports(tmp_path, keep=10)
         remaining = sorted(tmp_path.glob("lint-*.md"))
         assert len(remaining) == 10
         assert not (tmp_path / "lint-2026-01-01-0000.md").exists()
         assert not (tmp_path / "lint-2026-01-02-0000.md").exists()
 
     def test_rotate_lint_reports_keeps_all_when_under_limit(self, tmp_path: Path) -> None:
-        from core.lint import _rotate_lint_reports
+        from core.lint import rotate_lint_reports
 
         for i in range(5):
             (tmp_path / f"lint-2026-01-{i + 1:02d}-0000.md").write_text("x")
-        _rotate_lint_reports(tmp_path, keep=10)
+        rotate_lint_reports(tmp_path, keep=10)
         assert len(list(tmp_path.glob("lint-*.md"))) == 5

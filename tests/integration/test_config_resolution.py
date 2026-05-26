@@ -16,8 +16,8 @@ import pytest
 
 from core.config import (
     VaultConfig,
-    _clear_global_config_cache,
-    _clear_vault_config_cache,
+    clear_global_config_cache,
+    clear_vault_config_cache,
     resolve_context_chars,
     resolve_model,
 )
@@ -43,13 +43,13 @@ def _make_vault(parent: Path, name: str) -> Path:
 class TestConfigResolution:
     def setup_method(self) -> None:
         """Clear all config caches before each test to prevent cross-test bleed."""
-        _clear_global_config_cache()
-        _clear_vault_config_cache()
+        clear_global_config_cache()
+        clear_vault_config_cache()
 
     def teardown_method(self) -> None:
         """Clear caches after each test so next test starts clean."""
-        _clear_global_config_cache()
-        _clear_vault_config_cache()
+        clear_global_config_cache()
+        clear_vault_config_cache()
 
     def test_vault_model_overrides_global(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -106,7 +106,7 @@ class TestConfigResolution:
 
         # Tier 3: hardcoded default (24_000) when neither vault nor global config exists
         monkeypatch.setattr("core.config.GLOBAL_CONFIG_FILE", tmp_path / "nonexistent.json")
-        _clear_global_config_cache()
+        clear_global_config_cache()
         assert resolve_context_chars(vault_defaults_only) == 24_000
 
     def test_two_vaults_resolve_independently(

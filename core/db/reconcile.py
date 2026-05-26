@@ -7,7 +7,12 @@ from pathlib import Path
 
 from .pages import delete_page, upsert_page
 
-__all__ = ["partial_reconcile", "reconcile"]
+__all__ = [
+    "partial_reconcile",
+    "rebuild_backlinks_full",
+    "rebuild_backlinks_incremental",
+    "reconcile",
+]
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +52,7 @@ def reconcile(conn: sqlite3.Connection, wiki_root: Path) -> dict[str, int]:
         delete_page(conn, rel)
         removed += 1
 
-    _rebuild_backlinks_full(conn)
+    rebuild_backlinks_full(conn)
     return {"added": added, "updated": updated, "removed": removed}
 
 
@@ -82,13 +87,13 @@ def partial_reconcile(
         elif abs(mtime - existing[rel]) > 0.01:
             upsert_page(conn, wiki_root, md_path)
             updated += 1
-    _rebuild_backlinks_incremental(
+    rebuild_backlinks_incremental(
         conn, [str(p.relative_to(wiki_root)) for p in changed_paths if p.exists()]
     )
     return {"added": added, "updated": updated, "removed": 0}
 
 
-def _rebuild_backlinks_full(conn: sqlite3.Connection) -> None:
+def rebuild_backlinks_full(conn: sqlite3.Connection) -> None:
     """Rewrite the ``backlinks`` JSON column for every page from the ``links`` table.
 
     Reads outgoing-link edges from the ``links`` table (populated by ``upsert_page``)
@@ -136,7 +141,7 @@ def _rebuild_backlinks_full(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _rebuild_backlinks_incremental(conn: sqlite3.Connection, changed_paths: list[str]) -> None:
+def rebuild_backlinks_incremental(conn: sqlite3.Connection, changed_paths: list[str]) -> None:
     """Recompute backlinks only for pages whose link neighbourhood changed.
 
     A page's backlinks can change when one of the changed pages now links to it

@@ -1,11 +1,11 @@
 """Text extraction from local files and remote URLs.
 
 Public surface:
-- SOURCE_CHAR_LIMIT  — default character cap for extracted text
-- _extract_text()   — dispatch to the right extractor based on source type
-- _fetch_url()      — HTTP fetch + BeautifulSoup strip
-- _extract_pdf()    — pypdf extraction (optional dependency)
-- _extract_docx()   — python-docx extraction (optional dependency)
+- SOURCE_CHAR_LIMIT — default character cap for extracted text
+- extract_text()    — dispatch to the right extractor based on source type
+- fetch_url()       — HTTP fetch + BeautifulSoup strip
+- extract_pdf()     — pypdf extraction (optional dependency)
+- extract_docx()    — python-docx extraction (optional dependency)
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 
 log = logging.getLogger(__name__)
 
-__all__ = ["SOURCE_CHAR_LIMIT", "_extract_text"]
+__all__ = ["SOURCE_CHAR_LIMIT", "extract_docx", "extract_pdf", "extract_text", "fetch_url"]
 
 SOURCE_CHAR_LIMIT = 24_000
 
@@ -43,7 +43,7 @@ _BINARY_SUFFIXES = frozenset(
 )
 
 
-def _extract_text(source: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
+def extract_text(source: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
     """Dispatch text extraction to the appropriate handler based on the source string.
 
     Supported formats: .txt, .md, .pdf, .docx, and HTTP/HTTPS URLs.
@@ -63,7 +63,7 @@ def _extract_text(source: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str
         ValueError: The file extension is a known unsupported binary format.
     """
     if source.startswith("http://") or source.startswith("https://"):
-        return _fetch_url(source, char_limit=char_limit)
+        return fetch_url(source, char_limit=char_limit)
 
     p = Path(source)
     if not p.exists():
@@ -73,9 +73,9 @@ def _extract_text(source: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str
     if suffix in (".txt", ".md"):
         return p.read_text(errors="replace")[:char_limit], p.name
     if suffix == ".pdf":
-        return _extract_pdf(p, char_limit=char_limit), p.name
+        return extract_pdf(p, char_limit=char_limit), p.name
     if suffix == ".docx":
-        return _extract_docx(p, char_limit=char_limit), p.name
+        return extract_docx(p, char_limit=char_limit), p.name
     if suffix in _BINARY_SUFFIXES:
         raise ValueError(
             f"Unsupported file type '{suffix}'. "
@@ -88,7 +88,7 @@ def _extract_text(source: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str
         return "", p.name
 
 
-def _fetch_url(url: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
+def fetch_url(url: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]:
     """Fetch a URL, strip boilerplate HTML tags, and return plain text with the page title.
 
     Args:
@@ -111,7 +111,7 @@ def _fetch_url(url: str, char_limit: int = SOURCE_CHAR_LIMIT) -> tuple[str, str]
     return text[:char_limit], title
 
 
-def _extract_pdf(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
+def extract_pdf(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
     """Extract text from a PDF file using pypdf.
 
     Args:
@@ -135,7 +135,7 @@ def _extract_pdf(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
         return ""
 
 
-def _extract_docx(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
+def extract_docx(path: Path, char_limit: int = SOURCE_CHAR_LIMIT) -> str:
     """Extract plain text from a .docx file using python-docx.
 
     Args:

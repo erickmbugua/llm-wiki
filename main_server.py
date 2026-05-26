@@ -24,7 +24,7 @@ import uvicorn
 
 from core.config import GlobalConfig, VaultConfig
 from core.db import create_job, get_db
-from core.server import _run_ingest_job, register_vault_executor
+from core.server import register_vault_executor, run_ingest_job
 from core.watcher import VaultWatcher
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -61,7 +61,7 @@ def _make_ingest_callback(
             create_job(conn, job_id=job_id, vault=vname, source=file_path)
         finally:
             conn.close()
-        executor.submit(_run_ingest_job, vpath, vname, file_path, job_id, False)
+        executor.submit(run_ingest_job, vpath, vname, file_path, job_id, False)
 
     return _callback
 

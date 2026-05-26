@@ -28,8 +28,8 @@ from core.db import (
     upsert_page,
     vector_search,
 )
-from core.db.pages import _extract_summary, _infer_category
-from core.db.reconcile import _rebuild_backlinks_full, _rebuild_backlinks_incremental
+from core.db.pages import extract_summary, infer_category
+from core.db.reconcile import rebuild_backlinks_full, rebuild_backlinks_incremental
 from core.embeddings import compute_embedding
 
 # ── Schema / get_db ───────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ class TestDbConnection:
             assert conn2 is not None
 
 
-# ── _infer_category ───────────────────────────────────────────────────────────
+# ── infer_category ────────────────────────────────────────────────────────────
 
 
 class TestInferCategory:
@@ -96,28 +96,28 @@ class TestInferCategory:
         ],
     )
     def test_infers_correctly(self, rel_path: str, expected: str) -> None:
-        assert _infer_category(rel_path) == expected
+        assert infer_category(rel_path) == expected
 
 
-# ── _extract_summary ──────────────────────────────────────────────────────────
+# ── extract_summary ───────────────────────────────────────────────────────────
 
 
 class TestExtractSummary:
     def test_returns_first_non_heading_line(self) -> None:
         content = "# Heading\n\nThis is the summary.\nSecond line."
-        assert _extract_summary(content) == "This is the summary."
+        assert extract_summary(content) == "This is the summary."
 
     def test_skips_headings_and_table_rows(self) -> None:
         content = "## H2\n| col | col |\n\nActual summary here."
-        assert _extract_summary(content) == "Actual summary here."
+        assert extract_summary(content) == "Actual summary here."
 
     def test_returns_empty_for_blank_content(self) -> None:
-        assert _extract_summary("") == ""
-        assert _extract_summary("# Only heading") == ""
+        assert extract_summary("") == ""
+        assert extract_summary("# Only heading") == ""
 
     def test_truncates_to_300_chars(self) -> None:
         long_line = "x" * 400
-        assert len(_extract_summary(long_line)) == 300
+        assert len(extract_summary(long_line)) == 300
 
 
 # ── upsert_page / get_page / delete_page ─────────────────────────────────────
@@ -415,7 +415,7 @@ class TestPartialReconcile:
         conn.close()
 
 
-# ── _rebuild_backlinks collision detection ────────────────────────────────────
+# ── rebuild_backlinks collision detection ─────────────────────────────────────
 
 
 class TestRebuildBacklinksCollision:
@@ -440,13 +440,13 @@ class TestRebuildBacklinksCollision:
         upsert_page(conn, wiki, wiki / "Entities" / "Python.md")
 
         with caplog.at_level(logging.WARNING, logger="core.db.reconcile"):
-            _rebuild_backlinks_full(conn)  # must not raise
+            rebuild_backlinks_full(conn)  # must not raise
 
         assert any("collision" in msg.lower() or "Python" in msg for msg in caplog.messages)
 
         # Result must be stable — calling again produces identical backlinks
         first = conn.execute("SELECT file_path, backlinks FROM pages ORDER BY file_path").fetchall()
-        _rebuild_backlinks_full(conn)
+        rebuild_backlinks_full(conn)
         second = conn.execute(
             "SELECT file_path, backlinks FROM pages ORDER BY file_path"
         ).fetchall()
@@ -519,7 +519,7 @@ class TestLinksTable:
         upsert_page(db_conn, wiki, wiki / "Concepts" / "A.md")
         upsert_page(db_conn, wiki, wiki / "Concepts" / "B.md")
         upsert_page(db_conn, wiki, wiki / "Concepts" / "C.md")
-        _rebuild_backlinks_full(db_conn)
+        rebuild_backlinks_full(db_conn)
         row = get_page(db_conn, "Concepts/C.md")
         assert row is not None
         backlinks = json.loads(row["backlinks"])
@@ -542,7 +542,7 @@ class TestLinksTable:
         linker.write_text("---\ntitle: Linker\ntags: []\n---\nSee [[Page0]].\n")
         upsert_page(db_conn, wiki, linker)
 
-        _rebuild_backlinks_incremental(db_conn, ["Concepts/Linker.md"])
+        rebuild_backlinks_incremental(db_conn, ["Concepts/Linker.md"])
 
         # Page0 gets the backlink
         row0 = get_page(db_conn, "Concepts/Page0.md")
@@ -558,7 +558,7 @@ class TestLinksTable:
     def test_backlinks_wikilink_collision_warning(
         self, tmp_vault: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """_rebuild_backlinks_full logs a WARNING when two pages share the same stem."""
+        """rebuild_backlinks_full logs a WARNING when two pages share the same stem."""
         import logging
 
         wiki = tmp_vault / "wiki"
@@ -569,7 +569,7 @@ class TestLinksTable:
         upsert_page(conn, wiki, wiki / "Entities" / "Dup.md")
 
         with caplog.at_level(logging.WARNING, logger="core.db.reconcile"):
-            _rebuild_backlinks_full(conn)
+            rebuild_backlinks_full(conn)
 
         assert any("collision" in msg.lower() or "Dup" in msg for msg in caplog.messages)
         conn.close()

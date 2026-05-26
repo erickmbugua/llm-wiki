@@ -25,8 +25,8 @@ from fastapi.testclient import TestClient
 from core import server as server_mod
 from core.config import (
     VaultConfig,
-    _clear_global_config_cache,
-    _clear_vault_config_cache,
+    clear_global_config_cache,
+    clear_vault_config_cache,
 )
 from core.server import app, register_vault_executor
 from core.vault import init_vault
@@ -107,8 +107,8 @@ def patched_config(
     """
     from core.config import GlobalConfig
 
-    _clear_global_config_cache()
-    _clear_vault_config_cache()
+    clear_global_config_cache()
+    clear_vault_config_cache()
 
     cfg = GlobalConfig()
     cfg.vaults = {VAULT_NAME: str(vault_path)}
@@ -118,8 +118,8 @@ def patched_config(
 
     yield
 
-    _clear_global_config_cache()
-    _clear_vault_config_cache()
+    clear_global_config_cache()
+    clear_vault_config_cache()
 
 
 @pytest.fixture

@@ -17,7 +17,7 @@ from typing import Any
 import litellm
 import requests
 
-from .chunking import _chunk_text, _summarize_chunks
+from .chunking import chunk_text, summarize_chunks
 from .config import (
     resolve_chunk_config,
     resolve_context_chars,
@@ -34,11 +34,11 @@ from .db import (
     upsert_page,
 )
 from .embeddings import compute_embedding
-from .extraction import _extract_text
-from .prompts import _build_ingest_prompt, _build_ingest_prompt_strict, _parse_llm_json
+from .extraction import extract_text
+from .prompts import build_ingest_prompt, build_ingest_prompt_strict, parse_llm_json
 from .vault import rebuild_index
 
-__all__ = ["ingest_queued", "ingest_source"]
+__all__ = ["append_log", "check_ollama", "ingest_queued", "ingest_source", "write_pages"]
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def ingest_source(
         ValueError: Text extraction returned empty content.
     """
     char_limit = resolve_context_chars(vault_path)
-    text, display_name = _extract_text(source, char_limit=char_limit)
+    text, display_name = extract_text(source, char_limit=char_limit)
     if not text:
         raise ValueError(f"Could not extract text from: {source}")
 
@@ -91,17 +91,17 @@ def ingest_source(
 
     model = resolve_model(vault_path)
     if model.startswith("ollama/"):
-        _check_ollama(model)
+        check_ollama(model)
 
     chunk_size, chunk_overlap = resolve_chunk_config(vault_path)
-    chunks = _chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
+    chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
     if len(chunks) > 1:
         log.info(
             "Source '%s' split into %d chunks — running summarization pass",
             display_name,
             len(chunks),
         )
-        text = _summarize_chunks(
+        text = summarize_chunks(
             chunks,
             model=model,
             vault_name=vault_name,
@@ -112,7 +112,7 @@ def ingest_source(
             f"[This document was split into {len(chunks)} sections and pre-summarized.]\n\n" + text
         )
 
-    prompt = _build_ingest_prompt(vault_name, schema, related, display_name, text)
+    prompt = build_ingest_prompt(vault_name, schema, related, display_name, text)
 
     log.info("Calling %s for ingest of '%s'", model, display_name)
     response = litellm.completion(
@@ -126,24 +126,24 @@ def ingest_source(
     raw = str(raw)  # narrow Unknown | str | None → str after the guard above
 
     try:
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
     except ValueError:
         log.warning("JSON parse failed for '%s'; retrying with constrained prompt", display_name)
-        prompt_retry = _build_ingest_prompt_strict(vault_name, schema, related, display_name, text)
+        prompt_retry = build_ingest_prompt_strict(vault_name, schema, related, display_name, text)
         response_retry = litellm.completion(
             model=model,
             messages=[{"role": "user", "content": prompt_retry}],
             temperature=0.0,
         )
         raw_retry = str(response_retry.choices[0].message.content or "")  # pyright: ignore[reportAttributeAccessIssue]
-        result = _parse_llm_json(raw_retry)  # let ValueError propagate on second failure
+        result = parse_llm_json(raw_retry)  # let ValueError propagate on second failure
     if not dry_run:
-        written = _write_pages(wiki_root, result)
+        written = write_pages(wiki_root, result)
         with db_connection(vault_path) as conn:
             written_paths = [wiki_root / fp for fp in written]
             partial_reconcile(conn, wiki_root, written_paths)
             _store_embeddings(conn, wiki_root, written_paths, vault_path)
-        _append_log(vault_path, display_name, written)
+        append_log(vault_path, display_name, written)
         rebuild_index(vault_path)
         result["pages_written"] = written
     else:
@@ -230,7 +230,7 @@ def _store_embeddings(
 # ---------------------------------------------------------------------------
 
 
-def _check_ollama(model: str) -> None:
+def check_ollama(model: str) -> None:
     """Verify the Ollama server is reachable and the requested model is pulled.
 
     Results are cached in ``_ollama_verified`` for the lifetime of the process,
@@ -353,7 +353,7 @@ def _safe_wiki_path(wiki_root: Path, rel_path: str) -> Path | None:
     return resolved
 
 
-def _write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
+def write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
     """Write the source page and all page updates from the parsed LLM result to disk.
 
     Both ``"create"`` and ``"update"`` actions always write the full LLM-produced content,
@@ -395,7 +395,7 @@ def _write_pages(wiki_root: Path, result: dict[str, Any]) -> list[str]:
     return written
 
 
-def _append_log(vault_path: Path, source_name: str, pages_written: list[str]) -> None:
+def append_log(vault_path: Path, source_name: str, pages_written: list[str]) -> None:
     """Append an ingest activity entry to wiki/log.md.
 
     Args:

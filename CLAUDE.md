@@ -218,7 +218,7 @@ Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and `pyrightconf
 `LLM_WIKI_HOME=/path/to/dir` to redirect both methods to `$LLM_WIKI_HOME/config.json`.
 This is the mechanism e2e tests use to isolate each test's config from the developer's real
 vault registry. The process-level cache does not encode the env var — if `LLM_WIKI_HOME`
-changes mid-process without clearing the cache via `_clear_global_config_cache()`, the stale
+changes mid-process without clearing the cache via `clear_global_config_cache()`, the stale
 cached value is returned. This is not an issue in e2e tests because each subprocess starts
 with a fresh cache.
 
@@ -231,10 +231,10 @@ response.choices[0].message.content  # pyright: ignore[reportAttributeAccessIssu
 `.content` can also be `None` — always use `or ""` before calling `.strip()`.
 
 ### JSON parsing resilience in ingest
-`_parse_llm_json` uses a two-step parse strategy: fast-path `json.loads`, then
+`parse_llm_json` uses a two-step parse strategy: fast-path `json.loads`, then
 `json_repair.repair_json` as a fallback for near-valid LLM output (trailing commas,
 single quotes, missing closing braces, prose wrapping). If repair fails, a second LLM call
-is made via `_build_ingest_prompt_strict`, which prepends a JSON-only constraint.
+is made via `build_ingest_prompt_strict`, which prepends a JSON-only constraint.
 The ingest LLM call uses `temperature=0.0` — structured JSON output benefits from
 determinism; `temperature=0.3` is kept for `query_wiki` and `temperature=0.2` for `lint_vault`.
 
@@ -317,13 +317,13 @@ not by scanning `pages.content` at query time. `upsert_page` syncs the links tab
 atomically: it deletes all outgoing rows for the page then re-inserts current links.
 `delete_page` purges link rows before removing the page.
 
-`reconcile` calls `_rebuild_backlinks_full` (reads entire `links` table — O(pages) SQL, no
-regex). `partial_reconcile` calls `_rebuild_backlinks_incremental` which recomputes backlinks
+`reconcile` calls `rebuild_backlinks_full` (reads entire `links` table — O(pages) SQL, no
+regex). `partial_reconcile` calls `rebuild_backlinks_incremental` which recomputes backlinks
 only for the changed pages and their direct link neighbours, keeping per-ingest work
 proportional to the size of the change rather than the vault.
 
 Wikilink collision (two pages with the same stem, e.g. `Concepts/Python.md` and
-`Entities/Python.md`) is detected in `_rebuild_backlinks_full` when building the
+`Entities/Python.md`) is detected in `rebuild_backlinks_full` when building the
 `title_to_path` dict. The alphabetically first path wins; a WARNING is logged. The `links`
 table stores raw `target_stem` values, so renaming one of the colliding pages automatically
 resolves the collision on the next `reconcile` without any data migration.
@@ -349,9 +349,9 @@ vault-level `VaultConfig.context_chars` > global `GlobalConfig.context_chars` > 
 ### `chunk_size` / `chunk_overlap` — large-document map-reduce
 When a source's extracted text exceeds `chunk_size` characters, `ingest_source` runs a
 map-reduce summarization pass before the main ingest prompt:
-1. `_chunk_text` splits the text into overlapping windows of `chunk_size` chars (default `20_000`)
+1. `chunk_text` splits the text into overlapping windows of `chunk_size` chars (default `20_000`)
    with `chunk_overlap` chars (default `500`) shared between adjacent chunks.
-2. `_summarize_chunks` calls the LLM once per chunk to extract key bullet points.
+2. `summarize_chunks` calls the LLM once per chunk to extract key bullet points.
 3. The concatenated summaries (capped at `context_chars`) feed the final ingest prompt.
 
 Override per-vault with `llm-wiki set-chunk-size` / `llm-wiki set-chunk-overlap`.
@@ -368,11 +368,15 @@ at startup via `register_vault_executor()`. When the server is started without `
 (e.g. direct uvicorn or tests), a one-shot `ThreadPoolExecutor` is created on the fly.
 
 ### db/ sub-package — import paths
-All database symbols are imported from `core.db` (or its sub-modules for private helpers):
+All database symbols are imported from `core.db` (the package re-exports the full public API):
 ```python
 from core.db import get_db, search, reconcile   # public API
-from core.db.pages import _infer_category       # private helpers — import from sub-module directly
-from core.db.reconcile import _rebuild_backlinks_full
+```
+Helpers not re-exported by `core.db.__init__` (e.g. `infer_category`, `rebuild_backlinks_full`)
+can be imported directly from their sub-module:
+```python
+from core.db.pages import infer_category, extract_summary
+from core.db.reconcile import rebuild_backlinks_full, rebuild_backlinks_incremental
 ```
 Embedding computation is in `core.embeddings`, not `core.db`:
 ```python
@@ -382,7 +386,7 @@ When patching in tests, target the sub-module where the name is defined:
 ```python
 patch("core.embeddings.litellm.embedding", ...)   # not core.db.litellm.embedding
 ```
-When using `caplog` to capture warnings from `_rebuild_backlinks_full`, the logger is
+When using `caplog` to capture warnings from `rebuild_backlinks_full`, the logger is
 `"core.db.reconcile"` (the module's `__name__`), not `"core.database"`.
 
 ### sqlite-vec extension loading
@@ -403,7 +407,7 @@ Pull it before ingest:
 ollama pull nomic-embed-text
 ```
 If the embedding call fails (model not running, dimension mismatch), `ingest_source` and
-`_build_context` both catch the exception and continue without embeddings — FTS5-only search
+`build_context` both catch the exception and continue without embeddings — FTS5-only search
 acts as the graceful fallback. Override the embedding model per-vault with
 `llm-wiki set-embedding-model`. `resolve_embedding_config(vault_path) -> tuple[str, int]` uses
 the same three-level priority chain as `resolve_model`.
@@ -435,15 +439,15 @@ llm-wiki/
 │   ├── config.py      # GlobalConfig, VaultConfig, resolve_model(), resolve_context_chars(), resolve_chunk_config(), resolve_embedding_config()
 │   ├── constants.py   # WIKI_CATEGORIES — single source of truth for top-level wiki directory names
 │   ├── embeddings.py  # compute_embedding() — litellm embedding call, returns list[float]
-│   ├── extraction.py  # _extract_text(), _fetch_url(), _extract_pdf(), _extract_docx(), SOURCE_CHAR_LIMIT
-│   ├── chunking.py    # _chunk_text(), _summarize_chunks() — map-reduce for large docs
-│   ├── prompts.py     # _build_ingest_prompt(), _build_ingest_prompt_strict(), _parse_llm_json()
+│   ├── extraction.py  # extract_text(), fetch_url(), extract_pdf(), extract_docx(), SOURCE_CHAR_LIMIT
+│   ├── chunking.py    # chunk_text(), summarize_chunks() — map-reduce for large docs
+│   ├── prompts.py     # build_ingest_prompt(), build_ingest_prompt_strict(), parse_llm_json()
 │   ├── db/            # SQLite persistence layer (split by concern)
 │   │   ├── __init__.py    # Re-exports all public symbols; sub-module map in docstring
 │   │   ├── connection.py  # get_db(), db_connection(), _ensure_schema() — connection lifecycle + schema DDL
-│   │   ├── pages.py       # upsert_page(), delete_page(), get_page(), list_pages(), _infer_category(), _extract_summary()
+│   │   ├── pages.py       # upsert_page(), delete_page(), get_page(), list_pages(), infer_category(), extract_summary()
 │   │   ├── search.py      # search() FTS5, vector_search() KNN, hybrid_search() RRF
-│   │   ├── reconcile.py   # reconcile(), partial_reconcile(), _rebuild_backlinks_full/incremental()
+│   │   ├── reconcile.py   # reconcile(), partial_reconcile(), rebuild_backlinks_full/incremental()
 │   │   ├── queue.py       # queue_raw_file(), get_pending_queue(), mark_queue_item()
 │   │   └── jobs.py        # create_job(), update_job_status(), get_job(), list_jobs()
 │   ├── ingest.py      # Orchestration only: extract → related search → LLM call → parse → write → reconcile → log

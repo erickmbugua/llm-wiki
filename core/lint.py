@@ -13,9 +13,9 @@ import litellm
 from .config import resolve_model
 from .constants import WIKI_CATEGORIES
 from .db import db_connection, list_pages, reconcile
-from .prompts import _build_lint_prompt
+from .prompts import build_lint_prompt
 
-__all__ = ["lint_vault"]
+__all__ = ["lint_vault", "rotate_lint_reports", "save_lint_report", "structural_checks"]
 
 log = logging.getLogger(__name__)
 
@@ -44,9 +44,9 @@ def lint_vault(vault_path: Path) -> dict[str, Any]:
         reconcile(conn, wiki_root)
         pages = list_pages(conn)
 
-    structural = _structural_checks(wiki_root, pages)
+    structural = structural_checks(wiki_root, pages)
     llm_report = _llm_lint(vault_path, wiki_root, pages)
-    saved_to = _save_lint_report(vault_path, wiki_root, structural, llm_report)
+    saved_to = save_lint_report(vault_path, wiki_root, structural, llm_report)
 
     return {
         "structural": structural,
@@ -60,7 +60,7 @@ def lint_vault(vault_path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _structural_checks(wiki_root: Path, pages: list[dict[str, Any]]) -> dict[str, Any]:
+def structural_checks(wiki_root: Path, pages: list[dict[str, Any]]) -> dict[str, Any]:
     """Scan all pages for structural issues without calling the LLM.
 
     Checks for:
@@ -146,7 +146,7 @@ def _llm_lint(vault_path: Path, wiki_root: Path, pages: list[dict]) -> str:
             content = path.read_text()[:CONTRADICTION_CHARS]
             page_snippets.append(f"### {p['title']} ({p['file_path']})\n{content}")
 
-    prompt = _build_lint_prompt("\n\n".join(page_snippets))
+    prompt = build_lint_prompt("\n\n".join(page_snippets))
     model = resolve_model(vault_path)
     log.info("Calling %s for lint pass", model)
     response = litellm.completion(
@@ -162,7 +162,7 @@ def _llm_lint(vault_path: Path, wiki_root: Path, pages: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _rotate_lint_reports(vault_path: Path, keep: int = MAX_LINT_REPORTS) -> None:
+def rotate_lint_reports(vault_path: Path, keep: int = MAX_LINT_REPORTS) -> None:
     """Delete the oldest lint-*.md files at vault_path, keeping at most ``keep``.
 
     Files are sorted lexicographically, which is chronological because the filename
@@ -177,7 +177,7 @@ def _rotate_lint_reports(vault_path: Path, keep: int = MAX_LINT_REPORTS) -> None
         old.unlink()
 
 
-def _save_lint_report(
+def save_lint_report(
     vault_path: Path, wiki_root: Path, structural: dict[str, Any], llm_report: str
 ) -> str:
     """Write a combined lint report to the vault root and append a summary entry to log.md.
@@ -244,5 +244,5 @@ def _save_lint_report(
             f"Orphans: {len(structural['orphans'])}, Broken links: {len(structural['broken_links'])}\n"
         )
 
-    _rotate_lint_reports(vault_path)
+    rotate_lint_reports(vault_path)
     return rel_path

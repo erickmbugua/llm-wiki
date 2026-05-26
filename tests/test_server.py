@@ -18,10 +18,10 @@ def client(populated_vault: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     TestClient with GlobalConfig patched to point at populated_vault.
     Clear the config.py cache first so no stale state leaks between tests.
     """
-    from core.config import _clear_global_config_cache, _clear_vault_config_cache
+    from core.config import clear_global_config_cache, clear_vault_config_cache
 
-    _clear_global_config_cache()
-    _clear_vault_config_cache()
+    clear_global_config_cache()
+    clear_vault_config_cache()
     cfg = GlobalConfig()
     cfg.vaults = {"TestVault": str(populated_vault)}
     cfg.default_vault = "TestVault"
@@ -195,7 +195,7 @@ class TestApiReconcile:
 class TestApiIngest:
     def test_returns_202_with_job_id(self, client: TestClient, vault_name: str) -> None:
         """POST ingest must return HTTP 202 and a job_id immediately."""
-        with patch("core.server._run_ingest_job"):
+        with patch("core.server.run_ingest_job"):
             r = client.post(
                 f"/api/vaults/{vault_name}/ingest",
                 json={"source": "https://example.com", "dry_run": False},
@@ -209,7 +209,7 @@ class TestApiIngest:
         self, client: TestClient, vault_name: str, populated_vault: Path
     ) -> None:
         """After POST, the job should exist in the DB with status=pending."""
-        with patch("core.server._run_ingest_job"):
+        with patch("core.server.run_ingest_job"):
             r = client.post(
                 f"/api/vaults/{vault_name}/ingest",
                 json={"source": "https://example.com"},
@@ -220,14 +220,14 @@ class TestApiIngest:
         assert r2.json()["status"] == "pending"
 
     def test_dry_run_flag_forwarded_to_worker(self, client: TestClient, vault_name: str) -> None:
-        """The dry_run flag should be passed to _run_ingest_job."""
-        with patch("core.server._run_ingest_job") as mock_worker:
+        """The dry_run flag should be passed to run_ingest_job."""
+        with patch("core.server.run_ingest_job") as mock_worker:
             client.post(
                 f"/api/vaults/{vault_name}/ingest",
                 json={"source": "/tmp/test.txt", "dry_run": True},
             )
         # Give the thread a moment to submit (client.post blocks until 202 is sent)
-        # _run_ingest_job is patched so it returns instantly; check the call args
+        # run_ingest_job is patched so it returns instantly; check the call args
         mock_worker.assert_called_once()
         call_args = mock_worker.call_args
         # dry_run is the 5th positional arg: (vpath, vname, source, job_id, dry_run)
@@ -249,7 +249,7 @@ class TestApiJobs:
         assert isinstance(r.json()["jobs"], list)
 
     def test_list_jobs_includes_created_job(self, client: TestClient, vault_name: str) -> None:
-        with patch("core.server._run_ingest_job"):
+        with patch("core.server.run_ingest_job"):
             client.post(
                 f"/api/vaults/{vault_name}/ingest",
                 json={"source": "https://example.com"},

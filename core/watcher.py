@@ -27,7 +27,7 @@ class _RawFolderHandler(FileSystemEventHandler):
         self.vault_path = vault_path
         self.on_file = on_file
 
-    def _handle(self, path: str) -> None:
+    def handle(self, path: str) -> None:
         p = Path(path)
         if p.suffix.lower() in IGNORED_SUFFIXES or p.name.startswith("."):
             return
@@ -39,11 +39,11 @@ class _RawFolderHandler(FileSystemEventHandler):
 
     def on_created(self, event: DirCreatedEvent | FileCreatedEvent) -> None:
         if not event.is_directory:
-            self._handle(str(event.src_path))
+            self.handle(str(event.src_path))
 
     def on_moved(self, event: DirMovedEvent | FileMovedEvent) -> None:
         if not event.is_directory:
-            self._handle(str(event.dest_path))
+            self.handle(str(event.dest_path))
 
 
 class VaultWatcher:
@@ -67,3 +67,14 @@ class VaultWatcher:
 
     def is_alive(self) -> bool:
         return self._observer.is_alive()
+
+    def handle_file(self, path: str) -> None:
+        """Queue a file as if it had been dropped into raw/, bypassing the watchdog observer.
+
+        Useful for tests and manual ingestion triggers — delegates to the internal
+        handler so filtering (ignored suffixes, hidden files) still applies.
+
+        Args:
+            path: Absolute path to the file to queue.
+        """
+        self._handler.handle(path)

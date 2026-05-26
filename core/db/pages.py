@@ -13,7 +13,14 @@ import yaml
 
 from ..constants import WIKI_CATEGORIES
 
-__all__ = ["delete_page", "get_page", "list_pages", "upsert_page"]
+__all__ = [
+    "delete_page",
+    "extract_summary",
+    "get_page",
+    "infer_category",
+    "list_pages",
+    "upsert_page",
+]
 
 log = logging.getLogger(__name__)
 
@@ -48,8 +55,8 @@ def upsert_page(
     mtime = md_path.stat().st_mtime
 
     rel_path = str(md_path.relative_to(wiki_root))
-    category = _infer_category(rel_path)
-    summary = _extract_summary(content)
+    category = infer_category(rel_path)
+    summary = extract_summary(content)
 
     conn.execute(
         """
@@ -130,7 +137,7 @@ def list_pages(conn: sqlite3.Connection, category: str | None = None) -> list[di
     return [dict(r) for r in rows]
 
 
-def _infer_category(rel_path: str) -> str:
+def infer_category(rel_path: str) -> str:
     """Derive a page's category from its path relative to wiki_root.
 
     Args:
@@ -146,7 +153,7 @@ def _infer_category(rel_path: str) -> str:
     return "root"
 
 
-def _extract_summary(content: str) -> str:
+def extract_summary(content: str) -> str:
     """Extract a short summary from page content as the first meaningful prose line.
 
     Skips headings (``#``), table rows (``|``), and YAML fence lines (``---``).

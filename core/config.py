@@ -16,6 +16,8 @@ __all__ = [
     "VAULT_INTERNAL_DIR",
     "GlobalConfig",
     "VaultConfig",
+    "clear_global_config_cache",
+    "clear_vault_config_cache",
     "resolve_chunk_config",
     "resolve_context_chars",
     "resolve_embedding_config",
@@ -28,13 +30,13 @@ _global_cfg_cache: GlobalConfig | None = None
 _vault_cfg_cache: dict[str, VaultConfig] = {}
 
 
-def _clear_global_config_cache() -> None:
+def clear_global_config_cache() -> None:
     """Invalidate the GlobalConfig process cache. Call after any mutation saved to disk."""
     global _global_cfg_cache
     _global_cfg_cache = None
 
 
-def _clear_vault_config_cache(vault_path: Path | None = None) -> None:
+def clear_vault_config_cache(vault_path: Path | None = None) -> None:
     """Invalidate VaultConfig cache for one vault (or all vaults when vault_path is None)."""
     global _vault_cfg_cache
     if vault_path is None:
@@ -76,7 +78,7 @@ class GlobalConfig:
         overridden by setting the ``LLM_WIKI_HOME`` environment variable to an alternate
         directory. This is useful for e2e tests and multi-user installations.
 
-        Results are cached for the lifetime of the process. Call ``_clear_global_config_cache()``
+        Results are cached for the lifetime of the process. Call ``clear_global_config_cache()``
         to force a re-read (e.g. after mutating the file from another code path).
 
         Automatically drops any registered vault whose path no longer exists on disk
@@ -173,7 +175,7 @@ class VaultConfig:
         """Load per-vault config from <vault>/.llm-wiki/config.json, returning defaults if absent.
 
         Results are cached per vault path for the lifetime of the process. Call
-        ``_clear_vault_config_cache(vault_path)`` to force a re-read after an external mutation.
+        ``clear_vault_config_cache(vault_path)`` to force a re-read after an external mutation.
 
         Args:
             vault_path: Root directory of the vault.

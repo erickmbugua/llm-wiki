@@ -14,7 +14,7 @@ class TestRawFolderHandlerQueuesPaths:
         raw_file.touch()
 
         watcher = VaultWatcher(tmp_vault)
-        watcher._handler._handle(str(raw_file))
+        watcher.handle_file(str(raw_file))
 
         conn = get_db(tmp_vault)
         pending = get_pending_queue(conn)
@@ -33,7 +33,7 @@ class TestRawFolderHandlerQueuesPaths:
 
         received: list[str] = []
         watcher = VaultWatcher(tmp_vault, on_file=received.append)
-        watcher._handler._handle(str(raw_file))
+        watcher.handle_file(str(raw_file))
 
         assert received == [str(raw_file)]
 
@@ -42,7 +42,7 @@ class TestRawFolderHandlerQueuesPaths:
         raw_file = tmp_vault / "raw" / ".DS_Store"
 
         watcher = VaultWatcher(tmp_vault)
-        watcher._handler._handle(str(raw_file))
+        watcher.handle_file(str(raw_file))
 
         conn = get_db(tmp_vault)
         pending = get_pending_queue(conn)
@@ -54,7 +54,7 @@ class TestRawFolderHandlerQueuesPaths:
         for suffix in list(IGNORED_SUFFIXES)[:2]:
             raw_file = tmp_vault / "raw" / f"file{suffix}"
             watcher = VaultWatcher(tmp_vault)
-            watcher._handler._handle(str(raw_file))
+            watcher.handle_file(str(raw_file))
 
         conn = get_db(tmp_vault)
         pending = get_pending_queue(conn)

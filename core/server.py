@@ -30,7 +30,7 @@ from .lint import lint_vault
 from .query import query_wiki
 from .vault import rebuild_index, vault_stats
 
-__all__ = ["app", "register_vault_executor"]
+__all__ = ["app", "register_vault_executor", "run_ingest_job"]
 
 log = logging.getLogger(__name__)
 
@@ -264,7 +264,7 @@ class IngestRequest(BaseModel):
     dry_run: bool = False
 
 
-def _run_ingest_job(vpath: Path, vname: str, source: str, job_id: str, dry_run: bool) -> None:
+def run_ingest_job(vpath: Path, vname: str, source: str, job_id: str, dry_run: bool) -> None:
     """Execute an ingest job and update its DB record with the result.
 
     Intended to run inside a ThreadPoolExecutor worker — never on the event loop.
@@ -309,7 +309,7 @@ def api_ingest(vault_name: str, req: IngestRequest) -> JSONResponse:
         create_job(conn, job_id=job_id, vault=vname, source=req.source)
 
     executor = _get_executor(vname)
-    executor.submit(_run_ingest_job, vpath, effective_name, req.source, job_id, req.dry_run)
+    executor.submit(run_ingest_job, vpath, effective_name, req.source, job_id, req.dry_run)
 
     return JSONResponse({"job_id": job_id, "status": "pending"}, status_code=202)
 

@@ -9,28 +9,28 @@ import pytest
 import requests as req
 
 import core.ingest
-from core.chunking import _chunk_text, _summarize_chunks
-from core.extraction import _extract_text
+from core.chunking import chunk_text, summarize_chunks
+from core.extraction import extract_text
 from core.ingest import (
-    _append_log,
-    _check_ollama,
-    _write_pages,
+    append_log,
+    check_ollama,
     ingest_source,
+    write_pages,
 )
-from core.prompts import _build_ingest_prompt, _parse_llm_json
+from core.prompts import build_ingest_prompt, parse_llm_json
 
-# ── _chunk_text ───────────────────────────────────────────────────────────────
+# ── chunk_text ────────────────────────────────────────────────────────────────
 
 
 class TestChunkText:
     def test_single_chunk_when_text_fits(self) -> None:
         text = "x" * 1000
-        chunks = _chunk_text(text, chunk_size=2000, overlap=100)
+        chunks = chunk_text(text, chunk_size=2000, overlap=100)
         assert chunks == [text]
 
     def test_splits_into_multiple_chunks_with_overlap(self) -> None:
         text = "a" * 40_000
-        chunks = _chunk_text(text, chunk_size=20_000, overlap=500)
+        chunks = chunk_text(text, chunk_size=20_000, overlap=500)
         assert len(chunks) >= 2
         # Every chunk is at most chunk_size chars
         assert all(len(c) <= 20_000 for c in chunks)
@@ -42,21 +42,21 @@ class TestChunkText:
         # Build text where a newline sits 150 chars before the window end
         body = "a" * 9_850 + "\n" + "b" * 10_149
         text = body + "c" * 10_000  # total > chunk_size so chunking kicks in
-        chunks = _chunk_text(text, chunk_size=10_000, overlap=200)
+        chunks = chunk_text(text, chunk_size=10_000, overlap=200)
         # The first chunk should end just after the newline, not mid-sentence
         assert chunks[0].endswith("\n"), "First chunk should break at newline"
 
     def test_empty_string_returns_single_empty_chunk(self) -> None:
-        assert _chunk_text("", chunk_size=1000, overlap=50) == [""]
+        assert chunk_text("", chunk_size=1000, overlap=50) == [""]
 
     def test_overlap_cannot_exceed_chunk_size(self) -> None:
         # Should not raise even with degenerate overlap value
         text = "x" * 5000
-        chunks = _chunk_text(text, chunk_size=2000, overlap=3000)
+        chunks = chunk_text(text, chunk_size=2000, overlap=3000)
         assert len(chunks) >= 1
 
 
-# ── _summarize_chunks ─────────────────────────────────────────────────────────
+# ── summarize_chunks ──────────────────────────────────────────────────────────
 
 
 class TestSummarizeChunks:
@@ -66,7 +66,7 @@ class TestSummarizeChunks:
         chunks = ["chunk one", "chunk two", "chunk three"]
         mock_resp = fake_llm_response("• Key point")
         with patch("core.chunking.litellm.completion", return_value=mock_resp) as mock_llm:
-            result = _summarize_chunks(
+            result = summarize_chunks(
                 chunks, model="claude-sonnet-4-6", vault_name="TestVault", filename="doc.txt"
             )
         assert mock_llm.call_count == 3
@@ -74,7 +74,7 @@ class TestSummarizeChunks:
         assert "Part 3/3" in result
 
     def test_returns_empty_string_for_empty_chunk_list(self) -> None:
-        result = _summarize_chunks([], model="claude-sonnet-4-6", vault_name="V", filename="f.txt")
+        result = summarize_chunks([], model="claude-sonnet-4-6", vault_name="V", filename="f.txt")
         assert result == ""
 
     def test_truncates_when_summaries_exceed_context_chars(
@@ -84,7 +84,7 @@ class TestSummarizeChunks:
         big_summary = "x" * 10_000
         mock_resp = fake_llm_response(big_summary)
         with patch("core.chunking.litellm.completion", return_value=mock_resp):
-            result = _summarize_chunks(
+            result = summarize_chunks(
                 ["a", "b", "c"],
                 model="claude-sonnet-4-6",
                 vault_name="V",
@@ -95,26 +95,26 @@ class TestSummarizeChunks:
         assert result.endswith("above covers the first sections only]")
 
 
-# ── _extract_text ─────────────────────────────────────────────────────────────
+# ── extract_text ──────────────────────────────────────────────────────────────
 
 
 class TestExtractText:
     def test_reads_txt_file(self, tmp_path: Path) -> None:
         f = tmp_path / "doc.txt"
         f.write_text("Hello world")
-        text, name = _extract_text(str(f))
+        text, name = extract_text(str(f))
         assert text == "Hello world"
         assert name == "doc.txt"
 
     def test_reads_md_file(self, tmp_path: Path) -> None:
         f = tmp_path / "note.md"
         f.write_text("# Title\nBody text")
-        text, name = _extract_text(str(f))
+        text, name = extract_text(str(f))
         assert "Body text" in text
         assert name == "note.md"
 
     def test_returns_empty_for_nonexistent_file(self, tmp_path: Path) -> None:
-        text, _name = _extract_text(str(tmp_path / "missing.txt"))
+        text, _name = extract_text(str(tmp_path / "missing.txt"))
         assert text == ""
 
     def test_fetches_url(self) -> None:
@@ -123,7 +123,7 @@ class TestExtractText:
             "<html><head><title>My Page</title></head><body><p>Content here</p></body></html>"
         )
         with patch("core.extraction.requests.get", return_value=fake_response):
-            text, name = _extract_text("https://example.com/page")
+            text, name = extract_text("https://example.com/page")
         assert "Content here" in text
         assert name == "My Page"
 
@@ -131,14 +131,14 @@ class TestExtractText:
         fake_response = MagicMock()
         fake_response.text = "<html><body><script>evil()</script><p>Clean text</p></body></html>"
         with patch("core.extraction.requests.get", return_value=fake_response):
-            text, _ = _extract_text("https://example.com")
+            text, _ = extract_text("https://example.com")
         assert "evil()" not in text
         assert "Clean text" in text
 
     def test_truncates_large_content(self, tmp_path: Path) -> None:
         f = tmp_path / "big.txt"
         f.write_text("x" * 30_000)
-        text, _ = _extract_text(str(f))
+        text, _ = extract_text(str(f))
         assert len(text) == 24_000
 
     def test_extract_docx_returns_text(self, tmp_path: Path) -> None:
@@ -149,7 +149,7 @@ class TestExtractText:
         doc.add_paragraph("Second paragraph")
         path = tmp_path / "test.docx"
         doc.save(str(path))
-        text, name = _extract_text(str(path))
+        text, name = extract_text(str(path))
         assert "First paragraph" in text
         assert "Second paragraph" in text
         assert name == "test.docx"
@@ -160,19 +160,19 @@ class TestExtractText:
         path = tmp_path / "doc.docx"
         path.write_bytes(b"fake")
         with patch.dict(sys.modules, {"docx": None}):
-            from core.extraction import _extract_docx
+            from core.extraction import extract_docx
 
-            result = _extract_docx(path)
+            result = extract_docx(path)
         assert result == ""
 
     def test_binary_suffix_raises_value_error(self, tmp_path: Path) -> None:
         f = tmp_path / "data.xlsx"
         f.write_bytes(b"PK\x03\x04fake")
         with pytest.raises(ValueError, match="Unsupported file type"):
-            _extract_text(str(f))
+            extract_text(str(f))
 
 
-# ── _parse_llm_json ───────────────────────────────────────────────────────────
+# ── parse_llm_json ────────────────────────────────────────────────────────────
 
 
 class TestParseLlmJson:
@@ -180,41 +180,41 @@ class TestParseLlmJson:
         raw = json.dumps(
             {"source_page": {"file_path": "Sources/X.md", "content": "# X"}, "page_updates": []}
         )
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert result["source_page"]["file_path"] == "Sources/X.md"
         assert result["page_updates"] == []
 
     def test_strips_markdown_fences(self) -> None:
         raw = '```json\n{"source_page": {"file_path": "Sources/X.md", "content": "# X"}, "page_updates": []}\n```'
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert result["source_page"]["file_path"] == "Sources/X.md"
 
     def test_strips_plain_code_fences(self) -> None:
         raw = '```\n{"source_page": {"file_path": "Sources/X.md", "content": "# X"}}\n```'
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert "source_page" in result
 
     def test_defaults_page_updates_to_empty_list(self) -> None:
         raw = json.dumps({"source_page": {"file_path": "Sources/X.md", "content": "# X"}})
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert result["page_updates"] == []
 
     def test_raises_on_invalid_json(self) -> None:
         with pytest.raises(ValueError):
-            _parse_llm_json("not json at all")
+            parse_llm_json("not json at all")
 
     def test_raises_when_source_page_missing(self) -> None:
         with pytest.raises(ValueError, match="missing 'source_page'"):
-            _parse_llm_json(json.dumps({"page_updates": []}))
+            parse_llm_json(json.dumps({"page_updates": []}))
 
     def test_trailing_comma_is_repaired(self) -> None:
         raw = '{"source_page": {"file_path": "Sources/X.md", "content": "# X"},}'
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert result["source_page"]["file_path"] == "Sources/X.md"
 
     def test_single_quotes_are_repaired(self) -> None:
         raw = "{'source_page': {'file_path': 'Sources/X.md', 'content': '# X'}}"
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert result["source_page"]["file_path"] == "Sources/X.md"
 
     def test_prose_before_json_is_extracted(self) -> None:
@@ -222,25 +222,25 @@ class TestParseLlmJson:
             {"source_page": {"file_path": "Sources/X.md", "content": "# X"}, "page_updates": []}
         )
         raw = f"Here is the JSON output as requested:\n\n{payload}"
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert result["source_page"]["file_path"] == "Sources/X.md"
 
     def test_unrepairable_raises_value_error(self) -> None:
         with pytest.raises(ValueError):
-            _parse_llm_json("completely unparseable @@@ !!!")
+            parse_llm_json("completely unparseable @@@ !!!")
 
     def test_missing_source_page_after_repair_raises(self) -> None:
         raw = '{"page_updates": [],}'
         with pytest.raises(ValueError, match="missing 'source_page'"):
-            _parse_llm_json(raw)
+            parse_llm_json(raw)
 
     def test_missing_closing_brace_is_repaired(self) -> None:
         raw = '{"source_page": {"file_path": "Sources/X.md", "content": "# X"}'
-        result = _parse_llm_json(raw)
+        result = parse_llm_json(raw)
         assert result["source_page"]["file_path"] == "Sources/X.md"
 
 
-# ── _write_pages ──────────────────────────────────────────────────────────────
+# ── write_pages ───────────────────────────────────────────────────────────────
 
 
 class TestWritePages:
@@ -250,7 +250,7 @@ class TestWritePages:
             "source_page": {"file_path": "Sources/Article.md", "content": "# Article\nContent."},
             "page_updates": [],
         }
-        written = _write_pages(wiki, result)
+        written = write_pages(wiki, result)
         assert "Sources/Article.md" in written
         assert (wiki / "Sources" / "Article.md").read_text() == "# Article\nContent."
 
@@ -262,7 +262,7 @@ class TestWritePages:
                 {"file_path": "Concepts/NewConcept.md", "action": "create", "content": "# New"},
             ],
         }
-        written = _write_pages(wiki, result)
+        written = write_pages(wiki, result)
         assert "Concepts/NewConcept.md" in written
         assert (wiki / "Concepts" / "NewConcept.md").exists()
 
@@ -280,7 +280,7 @@ class TestWritePages:
                 },
             ],
         }
-        _write_pages(wiki, result)
+        write_pages(wiki, result)
         content = existing.read_text()
         assert content == "# Fully updated page"
         assert "# Original content" not in content
@@ -295,7 +295,7 @@ class TestWritePages:
                 {"file_path": "Concepts/Replace.md", "action": "update", "content": "# New"},
             ],
         }
-        _write_pages(wiki, result)
+        write_pages(wiki, result)
         assert existing.read_text() == "# New"
 
     def test_skips_entries_with_empty_content(self, tmp_vault: Path) -> None:
@@ -304,7 +304,7 @@ class TestWritePages:
             "source_page": {"file_path": "Sources/S.md", "content": "# S"},
             "page_updates": [{"file_path": "Concepts/Empty.md", "action": "create", "content": ""}],
         }
-        written = _write_pages(wiki, result)
+        written = write_pages(wiki, result)
         assert "Concepts/Empty.md" not in written
 
     def test_creates_nested_dirs(self, tmp_vault: Path) -> None:
@@ -313,7 +313,7 @@ class TestWritePages:
             "source_page": {"file_path": "Sources/Deep/Article.md", "content": "# A"},
             "page_updates": [],
         }
-        _write_pages(wiki, result)
+        write_pages(wiki, result)
         assert (wiki / "Sources" / "Deep" / "Article.md").exists()
 
     def test_unsafe_source_page_path_is_skipped(self, tmp_vault: Path) -> None:
@@ -325,7 +325,7 @@ class TestWritePages:
             },
             "page_updates": [],
         }
-        written = _write_pages(wiki, result)
+        written = write_pages(wiki, result)
         assert written == []
         assert not (tmp_vault / "evil.md").exists()
 
@@ -341,43 +341,43 @@ class TestWritePages:
                 }
             ],
         }
-        written = _write_pages(wiki, result)
+        written = write_pages(wiki, result)
         assert "Sources/Safe.md" in written
         assert "../../.llm-wiki/config.json" not in written
         assert (tmp_vault / ".llm-wiki" / "config.json").read_text() != "{}"
 
 
-# ── _build_ingest_prompt ──────────────────────────────────────────────────────
+# ── build_ingest_prompt ───────────────────────────────────────────────────────
 
 
 class TestBuildIngestPrompt:
     def test_contains_vault_name(self) -> None:
-        prompt = _build_ingest_prompt("MyVault", "", "", "source.txt", "text")
+        prompt = build_ingest_prompt("MyVault", "", "", "source.txt", "text")
         assert "MyVault" in prompt
 
     def test_contains_source_text(self) -> None:
-        prompt = _build_ingest_prompt("V", "", "", "f.txt", "unique_source_content_xyz")
+        prompt = build_ingest_prompt("V", "", "", "f.txt", "unique_source_content_xyz")
         assert "unique_source_content_xyz" in prompt
 
     def test_includes_no_related_section_when_empty(self) -> None:
-        prompt = _build_ingest_prompt("V", "", "", "f.txt", "text")
+        prompt = build_ingest_prompt("V", "", "", "f.txt", "text")
         assert "(none yet)" in prompt
 
     def test_includes_related_pages_when_provided(self) -> None:
-        prompt = _build_ingest_prompt("V", "", "### Existing Page\nContent", "f.txt", "text")
+        prompt = build_ingest_prompt("V", "", "### Existing Page\nContent", "f.txt", "text")
         assert "Existing Page" in prompt
 
     def test_prompt_instructs_yaml_colon_quoting(self) -> None:
-        prompt = _build_ingest_prompt("V", "", "", "f.txt", "text")
+        prompt = build_ingest_prompt("V", "", "", "f.txt", "text")
         assert "colon" in prompt.lower()
 
 
-# ── _append_log ───────────────────────────────────────────────────────────────
+# ── append_log ────────────────────────────────────────────────────────────────
 
 
 class TestAppendLog:
     def test_appends_entry_to_log(self, tmp_vault: Path) -> None:
-        _append_log(tmp_vault, "my-source.txt", ["Sources/X.md", "Concepts/Y.md"])
+        append_log(tmp_vault, "my-source.txt", ["Sources/X.md", "Concepts/Y.md"])
         log_text = (tmp_vault / "wiki" / "log.md").read_text()
         assert "my-source.txt" in log_text
         assert "Sources/X" in log_text
@@ -385,7 +385,7 @@ class TestAppendLog:
     def test_creates_log_if_missing(self, tmp_path: Path) -> None:
         vault = tmp_path / "v"
         (vault / "wiki").mkdir(parents=True)
-        _append_log(vault, "source", [])
+        append_log(vault, "source", [])
         assert (vault / "wiki" / "log.md").exists()
 
 
@@ -410,7 +410,7 @@ class TestIngestSourceChunking:
         with (
             patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
             patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
-            patch("core.ingest._summarize_chunks", return_value="summarized content") as mock_sc,
+            patch("core.ingest.summarize_chunks", return_value="summarized content") as mock_sc,
         ):
             result = ingest_source(tmp_vault, str(big_file), "TestVault")
 
@@ -433,7 +433,7 @@ class TestIngestSourceChunking:
         with (
             patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
             patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
-            patch("core.ingest._summarize_chunks") as mock_sc,
+            patch("core.ingest.summarize_chunks") as mock_sc,
         ):
             ingest_source(tmp_vault, str(small_file), "TestVault")
 
@@ -498,7 +498,7 @@ class TestIngestSource:
             ingest_source(tmp_vault, "/nonexistent/path/to/file.xyz", "TestVault")
 
 
-# ── _check_ollama ─────────────────────────────────────────────────────────────
+# ── check_ollama ──────────────────────────────────────────────────────────────
 
 
 class TestCheckOllama:
@@ -515,14 +515,14 @@ class TestCheckOllama:
             "models": [{"name": "qwen2.5-coder:7b"}, {"name": "llama3:8b"}]
         }
         with patch("core.ingest.requests.get", return_value=fake_resp):
-            _check_ollama("ollama/qwen2.5-coder:7b")  # must not raise
+            check_ollama("ollama/qwen2.5-coder:7b")  # must not raise
 
     def test_raises_when_server_unreachable(self) -> None:
         with (
             patch("core.ingest.requests.get", side_effect=req.exceptions.ConnectionError()),
             pytest.raises(RuntimeError, match="ollama serve"),
         ):
-            _check_ollama("ollama/qwen2.5-coder:7b")
+            check_ollama("ollama/qwen2.5-coder:7b")
 
     def test_raises_when_model_not_pulled(self) -> None:
         fake_resp = MagicMock()
@@ -531,7 +531,7 @@ class TestCheckOllama:
             patch("core.ingest.requests.get", return_value=fake_resp),
             pytest.raises(RuntimeError, match="ollama pull"),
         ):
-            _check_ollama("ollama/qwen2.5-coder:7b")
+            check_ollama("ollama/qwen2.5-coder:7b")
 
     def test_ingest_source_skips_preflight_for_non_ollama(
         self, tmp_vault: Path, fake_llm_response: Callable[[str], MagicMock]
@@ -547,7 +547,7 @@ class TestCheckOllama:
         with (
             patch("core.ingest.litellm.completion", return_value=fake_llm_response(llm_output)),
             patch("core.ingest.resolve_model", return_value="claude-sonnet-4-6"),
-            patch("core.ingest._check_ollama") as mock_check,
+            patch("core.ingest.check_ollama") as mock_check,
         ):
             ingest_source(tmp_vault, str(src), "TestVault")
         mock_check.assert_not_called()
@@ -557,8 +557,8 @@ class TestCheckOllama:
         fake_resp = MagicMock()
         fake_resp.json.return_value = {"models": [{"name": "qwen2.5-coder:7b"}]}
         with patch("core.ingest.requests.get", return_value=fake_resp) as mock_get:
-            _check_ollama("ollama/qwen2.5-coder:7b")
-            _check_ollama("ollama/qwen2.5-coder:7b")
+            check_ollama("ollama/qwen2.5-coder:7b")
+            check_ollama("ollama/qwen2.5-coder:7b")
         mock_get.assert_called_once()
 
     def test_check_ollama_different_models_each_checked(self) -> None:
@@ -568,8 +568,8 @@ class TestCheckOllama:
             "models": [{"name": "qwen2.5-coder:7b"}, {"name": "llama3:8b"}]
         }
         with patch("core.ingest.requests.get", return_value=fake_resp) as mock_get:
-            _check_ollama("ollama/qwen2.5-coder:7b")
-            _check_ollama("ollama/llama3:8b")
+            check_ollama("ollama/qwen2.5-coder:7b")
+            check_ollama("ollama/llama3:8b")
         assert mock_get.call_count == 2
 
 

@@ -1,11 +1,11 @@
 """Prompt assembly and LLM JSON parsing for the wiki pipeline.
 
 Public surface:
-- _build_ingest_prompt()        — assemble the primary ingest prompt
-- _build_ingest_prompt_strict() — retry variant with explicit JSON-only constraint
-- _parse_llm_json()             — parse (and repair) the LLM's JSON response
-- _build_query_prompt()         — assemble the Q&A prompt for query_wiki
-- _build_lint_prompt()          — assemble the quality-review prompt for lint_vault
+- build_ingest_prompt()        — assemble the primary ingest prompt
+- build_ingest_prompt_strict() — retry variant with explicit JSON-only constraint
+- parse_llm_json()             — parse (and repair) the LLM's JSON response
+- build_query_prompt()         — assemble the Q&A prompt for query_wiki
+- build_lint_prompt()          — assemble the quality-review prompt for lint_vault
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ import textwrap
 from typing import Any
 
 __all__ = [
-    "_build_ingest_prompt",
-    "_build_ingest_prompt_strict",
-    "_build_lint_prompt",
-    "_build_query_prompt",
-    "_parse_llm_json",
+    "build_ingest_prompt",
+    "build_ingest_prompt_strict",
+    "build_lint_prompt",
+    "build_query_prompt",
+    "parse_llm_json",
 ]
 
 log = logging.getLogger(__name__)
 
 
-def _build_ingest_prompt(
+def build_ingest_prompt(
     vault_name: str, schema: str, related: str, filename: str, text: str
 ) -> str:
     """Assemble the LLM prompt that instructs the model to produce wiki page JSON.
@@ -91,7 +91,7 @@ def _build_ingest_prompt(
     """).strip()
 
 
-def _build_ingest_prompt_strict(
+def build_ingest_prompt_strict(
     vault_name: str, schema: str, related: str, filename: str, text: str
 ) -> str:
     """Assemble a stricter ingest prompt for retry when the initial JSON parse fails.
@@ -116,10 +116,10 @@ def _build_ingest_prompt_strict(
         Start your response with { and end with }.
 
     """)
-    return preamble + _build_ingest_prompt(vault_name, schema, related, filename, text)
+    return preamble + build_ingest_prompt(vault_name, schema, related, filename, text)
 
 
-def _parse_llm_json(raw: str) -> dict[str, Any]:
+def parse_llm_json(raw: str) -> dict[str, Any]:
     """Parse the LLM's JSON response, attempting repair before failing.
 
     Strips markdown fences, tries json.loads, then json_repair.repair_json as a fallback.
@@ -168,7 +168,7 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
     return data
 
 
-def _build_query_prompt(question: str, context: str) -> str:
+def build_query_prompt(question: str, context: str) -> str:
     """Assemble the LLM prompt for answering a question from wiki context.
 
     Args:
@@ -194,7 +194,7 @@ def _build_query_prompt(question: str, context: str) -> str:
     """).strip()
 
 
-def _build_lint_prompt(pages_context: str) -> str:
+def build_lint_prompt(pages_context: str) -> str:
     """Assemble the LLM prompt for the wiki quality-review pass.
 
     Args:

@@ -288,7 +288,7 @@ class TestGlobalConfigCache:
         assert loaded.model == "after"
 
     def test_clear_cache_forces_disk_read(self, patched_global_config: Path) -> None:
-        """_clear_global_config_cache() causes the next load() to read from disk."""
+        """clear_global_config_cache() causes the next load() to read from disk."""
         GlobalConfig.load()  # populate cache
         (patched_global_config / "config.json").write_text(
             json.dumps(
@@ -305,7 +305,7 @@ class TestGlobalConfigCache:
                 }
             )
         )
-        cfg_mod._clear_global_config_cache()
+        cfg_mod.clear_global_config_cache()
         reloaded = GlobalConfig.load()
         assert reloaded.model == "fresh"
 
@@ -331,10 +331,10 @@ class TestVaultConfigCache:
         assert loaded is cfg
 
     def test_clear_cache_forces_disk_read(self, tmp_vault: Path) -> None:
-        """_clear_vault_config_cache() causes the next load() to read from disk."""
+        """clear_vault_config_cache() causes the next load() to read from disk."""
         VaultConfig.load(tmp_vault)  # populate cache
         cfg_file = tmp_vault / ".llm-wiki" / "config.json"
         cfg_file.write_text(json.dumps({"name": "fresh", "model": "fresh-model"}))
-        cfg_mod._clear_vault_config_cache(tmp_vault)
+        cfg_mod.clear_vault_config_cache(tmp_vault)
         reloaded = VaultConfig.load(tmp_vault)
         assert reloaded.model == "fresh-model"

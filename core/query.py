@@ -10,9 +10,9 @@ import litellm
 from .config import resolve_embedding_config, resolve_model
 from .db import db_connection, hybrid_search, partial_reconcile
 from .embeddings import compute_embedding
-from .prompts import _build_query_prompt
+from .prompts import build_query_prompt
 
-__all__ = ["query_wiki"]
+__all__ = ["build_context", "query_wiki", "save_answer"]
 
 log = logging.getLogger(__name__)
 
@@ -44,10 +44,10 @@ def query_wiki(
         - ``saved_to``: Relative path of the saved page, or ``None``.
     """
     wiki_root = vault_path / "wiki"
-    context, sources = _build_context(vault_path, wiki_root, question)
+    context, sources = build_context(vault_path, wiki_root, question)
     model = resolve_model(vault_path)
 
-    prompt = _build_query_prompt(question, context)
+    prompt = build_query_prompt(question, context)
     log.info("Calling %s for query", model)
     response = litellm.completion(
         model=model,
@@ -58,14 +58,14 @@ def query_wiki(
 
     saved_to = None
     if save_as:
-        saved_to = _save_answer(wiki_root, save_as, question, answer, sources)
+        saved_to = save_answer(wiki_root, save_as, question, answer, sources)
         with db_connection(vault_path) as conn:
             partial_reconcile(conn, wiki_root, [wiki_root / saved_to])
 
     return {"answer": answer, "sources": sources, "saved_to": saved_to}
 
 
-def _build_context(vault_path: Path, wiki_root: Path, question: str) -> tuple[str, list[str]]:
+def build_context(vault_path: Path, wiki_root: Path, question: str) -> tuple[str, list[str]]:
     """Search the wiki for pages relevant to the question and format them as an LLM context block.
 
     Uses hybrid retrieval (FTS5 + vector search with RRF) when an embedding model is
@@ -106,7 +106,7 @@ def _build_context(vault_path: Path, wiki_root: Path, question: str) -> tuple[st
     return "\n\n---\n\n".join(parts), sources
 
 
-def _save_answer(
+def save_answer(
     wiki_root: Path, save_as: str, question: str, answer: str, sources: list[str]
 ) -> str:
     """Write the LLM answer as a structured wiki page with YAML frontmatter.
