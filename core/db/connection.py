@@ -29,7 +29,7 @@ def get_db(vault_path: Path) -> sqlite3.Connection:
     """
     db_path = vault_path / VAULT_INTERNAL_DIR / VAULT_DB_FILE
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)  # pyright: ignore[reportAttributeAccessIssue]
@@ -59,80 +59,77 @@ def db_connection(vault_path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+_SCHEMA_STATEMENTS = [
+    """CREATE TABLE IF NOT EXISTS pages (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT UNIQUE NOT NULL,
+        title    TEXT NOT NULL,
+        category TEXT,
+        content  TEXT,
+        tags     TEXT DEFAULT '[]',
+        mtime    REAL,
+        summary  TEXT,
+        backlinks TEXT DEFAULT '[]'
+    )""",
+    """CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+        title,
+        content,
+        content=pages,
+        content_rowid=id,
+        tokenize='porter ascii'
+    )""",
+    """CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
+        INSERT INTO pages_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+    END""",
+    """CREATE TRIGGER IF NOT EXISTS pages_ad AFTER DELETE ON pages BEGIN
+        INSERT INTO pages_fts(pages_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+    END""",
+    """CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE ON pages BEGIN
+        INSERT INTO pages_fts(pages_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+        INSERT INTO pages_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+    END""",
+    """CREATE TABLE IF NOT EXISTS ingest_queue (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path   TEXT UNIQUE NOT NULL,
+        status      TEXT DEFAULT 'pending',
+        added_at    REAL,
+        processed_at REAL,
+        error       TEXT
+    )""",
+    "CREATE VIRTUAL TABLE IF NOT EXISTS page_vectors USING vec0(embedding float[768])",
+    """CREATE TABLE IF NOT EXISTS ingest_jobs (
+        id           TEXT PRIMARY KEY,
+        vault        TEXT NOT NULL,
+        source       TEXT NOT NULL,
+        status       TEXT DEFAULT 'pending',
+        created_at   REAL NOT NULL,
+        started_at   REAL,
+        finished_at  REAL,
+        pages_written TEXT DEFAULT '[]',
+        error        TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS links (
+        source_path TEXT NOT NULL,
+        target_stem TEXT NOT NULL,
+        PRIMARY KEY (source_path, target_stem)
+    )""",
+    "CREATE INDEX IF NOT EXISTS links_target_idx ON links(target_stem)",
+]
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create all tables, FTS5 virtual table, triggers, and indexes if they don't exist.
+
+    Uses individual execute() calls (not executescript) so SQLite's busy-retry
+    handler is respected when two connections race to initialise the schema.
 
     Args:
         conn: Open database connection.
     """
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS pages (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path TEXT UNIQUE NOT NULL,
-            title    TEXT NOT NULL,
-            category TEXT,
-            content  TEXT,
-            tags     TEXT DEFAULT '[]',
-            mtime    REAL,
-            summary  TEXT,
-            backlinks TEXT DEFAULT '[]'
-        );
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
-            title,
-            content,
-            content=pages,
-            content_rowid=id,
-            tokenize='porter ascii'
-        );
-
-        CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
-            INSERT INTO pages_fts(rowid, title, content)
-            VALUES (new.id, new.title, new.content);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS pages_ad AFTER DELETE ON pages BEGIN
-            INSERT INTO pages_fts(pages_fts, rowid, title, content)
-            VALUES ('delete', old.id, old.title, old.content);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE ON pages BEGIN
-            INSERT INTO pages_fts(pages_fts, rowid, title, content)
-            VALUES ('delete', old.id, old.title, old.content);
-            INSERT INTO pages_fts(rowid, title, content)
-            VALUES (new.id, new.title, new.content);
-        END;
-
-        CREATE TABLE IF NOT EXISTS ingest_queue (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path   TEXT UNIQUE NOT NULL,
-            status      TEXT DEFAULT 'pending',
-            added_at    REAL,
-            processed_at REAL,
-            error       TEXT
-        );
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS page_vectors USING vec0(
-            embedding float[768]
-        );
-        CREATE TABLE IF NOT EXISTS ingest_jobs (
-            id           TEXT PRIMARY KEY,
-            vault        TEXT NOT NULL,
-            source       TEXT NOT NULL,
-            status       TEXT DEFAULT 'pending',
-            created_at   REAL NOT NULL,
-            started_at   REAL,
-            finished_at  REAL,
-            pages_written TEXT DEFAULT '[]',
-            error        TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS links (
-            source_path TEXT NOT NULL,
-            target_stem TEXT NOT NULL,
-            PRIMARY KEY (source_path, target_stem)
-        );
-
-        CREATE INDEX IF NOT EXISTS links_target_idx ON links(target_stem);
-    """)
+    for stmt in _SCHEMA_STATEMENTS:
+        conn.execute(stmt)
     conn.commit()
