@@ -20,36 +20,17 @@ Vanilla JS dashboard, watchdog file watcher.
 
 ---
 
-## Workflow for New Features
+## Available Skills
 
-**Follow this sequence strictly. Do not skip steps or proceed without explicit approval.**
+Use these slash commands for structured work. Each skill encodes the project's conventions for that task type so you don't re-derive them from scratch.
 
-### 1. Requirements gathering
-Before writing any code, ask the user targeted questions to fully understand the requirement.
-If the feature touches external APIs, libraries, or architectural patterns — do research first
-(`WebSearch`, `WebFetch`) and bring findings back before asking questions.
-
-### 2. Present options with trade-offs
-Lay out 2–4 concrete implementation approaches. For each, state:
-- What it does
-- Key trade-off (complexity, performance, maintainability)
-- Your recommendation and why
-
-**Explicitly wait for the user to select an approach before proceeding.**
-
-### 3. Write an implementation plan
-Once an approach is chosen, produce a step-by-step plan covering:
-- Files to create or modify
-- New functions/classes and their signatures
-- Test cases to write (TDD: tests first)
-- Any migrations or schema changes
-
-**Present the plan and explicitly wait for approval before writing any code.**
-
-### 4. Code — in TDD order
-1. Write failing tests that specify the behaviour
-2. Write the implementation to make them pass
-3. Refactor if needed, keeping tests green
+| Skill | When to use |
+|-------|-------------|
+| `/feature <description>` | Any new feature — gates through requirements → options → plan → TDD |
+| `/qa` | Before declaring any task complete |
+| `/add-route <description>` | Adding a new FastAPI endpoint to `core/server.py` |
+| `/add-config <field-name>` | Adding a config field to `GlobalConfig` / `VaultConfig` with a `resolve_*` function |
+| `/db-change <description>` | Adding or altering a DB table or column in `core/db/` |
 
 ---
 
@@ -208,8 +189,7 @@ All QA tools run from the project venv: `.venv/bin/<tool>`
 | `pytest` | Test suite (288 tests) | `.venv/bin/pytest tests/ -q` |
 | `pre-commit` | Git hook runner (ruff + mypy on commit) | `.venv/bin/pre-commit run --all-files` |
 
-**Before declaring any task complete, all five commands must exit cleanly with zero errors.**
-Run them in this order: `ruff check --fix` → `ruff format` → `mypy` → `pyright` → `pytest`.
+**Before declaring any task complete, run `/qa`** — it runs all five tools in order and interprets failures against known gotchas.
 
 **Active ruff rule sets:** E, W, F, I, UP, B, C4, SIM, RUF, PERF.
 **Active mypy strict flags:** `check_untyped_defs`, `disallow_untyped_defs`, `disallow_incomplete_defs`
