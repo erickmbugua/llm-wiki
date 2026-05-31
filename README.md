@@ -95,6 +95,46 @@ bin/llm-wiki serve   # → http://127.0.0.1:8000
 
 ---
 
+## CLI Commands
+
+Run any command with `--help` for full option details.
+
+### Vault management
+
+| Command | Description |
+|---------|-------------|
+| `llm-wiki init [PATH] [-n NAME]` | Initialize llm-wiki structure in PATH (default: `.`). Registers the vault globally. |
+| `llm-wiki list` | List all registered vaults with their path, default flag, and effective model. |
+| `llm-wiki status [-v VAULT]` | Show page counts, raw queue depth, and per-category stats for a vault. |
+| `llm-wiki use VAULT_NAME` | Set the default vault (used when `-v` is omitted). |
+| `llm-wiki unregister VAULT_NAME` | Remove a vault from the registry. Files on disk are left untouched. |
+
+### Configuration
+
+All config commands accept `-v VAULT` to apply the setting to a single vault instead of globally.
+The three-level priority chain is: vault config > global config > built-in default.
+
+| Command | Description |
+|---------|-------------|
+| `llm-wiki set-model MODEL [-v VAULT]` | Set the LiteLLM model string (e.g. `claude-sonnet-4-6`, `gpt-4o`, `ollama/llama3`). |
+| `llm-wiki set-context CHARS [-v VAULT]` | Max source characters fed to the LLM per ingest. Defaults: 6 000 (3B–4B), **24 000** (7B), 48 000 (70B+/cloud). |
+| `llm-wiki set-chunk-size CHARS [-v VAULT]` | Characters per chunk for large-document map-reduce summarization. Default: 20 000. |
+| `llm-wiki set-chunk-overlap CHARS [-v VAULT]` | Overlap between adjacent chunks (preserves context at boundaries). Default: 500. |
+| `llm-wiki set-embedding-model MODEL [-v VAULT]` | Embedding model for semantic (vector) search (e.g. `ollama/nomic-embed-text`). |
+
+### LLM operations
+
+| Command | Description |
+|---------|-------------|
+| `llm-wiki ingest SOURCE [-v VAULT] [--dry-run]` | Ingest a file path or URL. Extracts text → LLM generates wiki pages → writes to `wiki/` → updates index. `--dry-run` shows what would be written without touching disk. |
+| `llm-wiki query QUESTION [-v VAULT] [--save-as PATH]` | Answer a question from wiki content via FTS5 context retrieval + LLM. `--save-as` persists the answer as a new wiki page. |
+| `llm-wiki lint [-v VAULT]` | Run a full lint pass: orphan detection, broken wikilinks, missing summaries, and LLM contradiction review. Saves a report to the vault root. |
+| `llm-wiki index [-v VAULT]` | Rebuild `wiki/index.md` from the current database state without a full reconcile. |
+| `llm-wiki reconcile [-v VAULT]` | Re-sync the FTS5 search index with all wiki files on disk (full scan). |
+| `llm-wiki serve [--host HOST] [-p PORT]` | Start the web dashboard and per-vault file watchers. Default: `http://127.0.0.1:8000`. Ctrl-C cleanly stops everything. |
+
+---
+
 ## Directory Map
 
 | Path | Purpose |
