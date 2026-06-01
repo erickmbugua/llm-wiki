@@ -76,21 +76,24 @@ Every initialized vault has:
 # 1. Install dependencies (creates .venv automatically)
 uv sync --extra dev
 
-# 2. Initialize a vault
-bin/llm-wiki init ~/Obsidian-Vaults/AI-Agents --name AI-Agents
+# 2. Activate the venv
+source .venv/bin/activate
+
+# 3. Initialize a vault
+llm-wiki init ~/Obsidian-Vaults/AI-Agents --name AI-Agents
 
 # 4. Set the LLM model (litellm model string)
-bin/llm-wiki set-model claude-sonnet-4-6
+llm-wiki set-model claude-sonnet-4-6
 export ANTHROPIC_API_KEY=sk-...
 
 # 5. Ingest a source
-bin/llm-wiki ingest https://example.com/article
+llm-wiki ingest https://example.com/article
 
 # 6. Query
-bin/llm-wiki query "What are the key ideas about X?"
+llm-wiki query "What are the key ideas about X?"
 
 # 7. Start the dashboard
-bin/llm-wiki serve   # → http://127.0.0.1:8000
+llm-wiki serve   # → http://127.0.0.1:8000
 ```
 
 ---
@@ -141,8 +144,7 @@ The three-level priority chain is: vault config > global config > built-in defau
 |------|---------|
 | `main.py` | Click CLI group — all user-facing commands |
 | `main_server.py` | Server startup: FastAPI + per-vault watchdog watchers |
-| `bin/llm-wiki` | Executable wrapper that puts the project on `sys.path` |
-| `requirements.txt` | All Python dependencies |
+| `pyproject.toml` | Declares the `llm-wiki` entry point (installed to `.venv/bin/llm-wiki` by `uv sync`) |
 | `core/` | Shared Python library used by CLI, server, and MCP |
 | `app/` | Web dashboard: HTML template, CSS, and JS |
 
@@ -159,8 +161,8 @@ LiteLLM routes based on the model string. Set the corresponding API key:
 | `ollama/llama3` | (none — needs Ollama running) |
 | `gemini/gemini-pro` | `GEMINI_API_KEY` |
 
-Override globally: `bin/llm-wiki set-model <model>`  
-Override per-vault: `bin/llm-wiki set-model <model> --vault MyVault`
+Override globally: `llm-wiki set-model <model>`  
+Override per-vault: `llm-wiki set-model <model> --vault MyVault`
 
 ---
 
@@ -191,7 +193,7 @@ Available MCP tools: `search_wiki`, `view_page`, `list_pages`, `ingest`, `query`
 # Install dev dependencies first
 uv sync --extra dev
 
-# Full suite (unit + integration, 265 tests)
+# Full suite (unit + integration + e2e, 288 tests)
 .venv/bin/pytest tests/ -q
 
 # Unit tests only (fast, no external processes)
