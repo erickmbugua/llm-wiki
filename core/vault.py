@@ -41,6 +41,13 @@ def init_vault(vault_path: Path, name: str) -> None:
     # keep the SQLite DB out of Obsidian and git
     _write_if_missing(internal / ".gitignore", "wiki.db\n")
 
+    # Initialise the DB now so WAL mode is set before any concurrent connections
+    # open it. PRAGMA journal_mode=WAL requires exclusive access the first time it
+    # runs; if two connections (e.g. watcher thread + polling loop) race to open a
+    # brand-new DB file they can both fail with "database is locked".
+    with db_connection(vault_path):
+        pass
+
     cfg = VaultConfig(name=name)
     cfg.save(vault_path)
 
