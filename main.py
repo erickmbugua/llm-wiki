@@ -4,11 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
 from core.config import GlobalConfig, VaultConfig
 from core.vault import init_vault, vault_stats
+
+load_dotenv()
 
 console = Console()
 

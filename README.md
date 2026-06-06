@@ -84,15 +84,18 @@ llm-wiki init ~/Obsidian-Vaults/AI-Agents --name AI-Agents
 
 # 4. Set the LLM model (litellm model string)
 llm-wiki set-model claude-sonnet-4-6
-export ANTHROPIC_API_KEY=sk-...
 
-# 5. Ingest a source
+# 5. Add your API key — copy .env.example to .env and fill it in
+cp .env.example .env
+# then edit .env and set e.g. ANTHROPIC_API_KEY=sk-...
+
+# 6. Ingest a source
 llm-wiki ingest https://example.com/article
 
-# 6. Query
+# 7. Query
 llm-wiki query "What are the key ideas about X?"
 
-# 7. Start the dashboard
+# 8. Start the dashboard
 llm-wiki serve   # → http://127.0.0.1:8000
 ```
 
@@ -152,14 +155,17 @@ The three-level priority chain is: vault config > global config > built-in defau
 
 ## LLM Provider Configuration
 
-LiteLLM routes based on the model string. Set the corresponding API key:
+LiteLLM routes based on the model string. Set the corresponding API key in `.env` (copy `.env.example` to get started):
 
 | Model string | Env var needed |
 |---|---|
 | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | `gpt-4o` | `OPENAI_API_KEY` |
-| `ollama/llama3` | (none — needs Ollama running) |
+| `openrouter/anthropic/claude-3-5-sonnet` | `OPENROUTER_API_KEY` |
 | `gemini/gemini-pro` | `GEMINI_API_KEY` |
+| `ollama/llama3` | (none — needs Ollama running locally) |
+
+Keys are loaded automatically from `.env` at startup — no `export` needed.
 
 Override globally: `llm-wiki set-model <model>`  
 Override per-vault: `llm-wiki set-model <model> --vault MyVault`
@@ -176,12 +182,13 @@ Add to your MCP settings:
     "llm-wiki": {
       "command": "/path/to/.venv/bin/python",
       "args": ["-m", "core.mcp_server"],
-      "cwd": "/path/to/llm-wiki",
-      "env": { "ANTHROPIC_API_KEY": "sk-..." }
+      "cwd": "/path/to/llm-wiki"
     }
   }
 }
 ```
+
+API keys are loaded from `.env` in the project root. If you need to pass them explicitly (e.g. the MCP host doesn't inherit your shell env), add an `"env"` block: `{ "ANTHROPIC_API_KEY": "sk-..." }`.
 
 Available MCP tools: `search_wiki`, `view_page`, `list_pages`, `ingest`, `query`, `lint`, `list_vaults`.
 

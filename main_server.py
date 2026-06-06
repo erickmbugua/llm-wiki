@@ -21,11 +21,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 
 from core.config import GlobalConfig, VaultConfig
 from core.db import create_job, get_db
 from core.server import register_vault_executor, run_ingest_job
 from core.watcher import VaultWatcher
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
