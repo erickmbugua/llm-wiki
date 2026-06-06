@@ -140,6 +140,7 @@ _KNOWN_MODEL_PREFIXES = (
     "gpt-",
     "gemini/",
     "mistral/",
+    "openrouter/",
     "groq/",
     "together_ai/",
     "bedrock/",
